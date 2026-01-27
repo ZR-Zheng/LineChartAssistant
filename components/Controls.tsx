@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ChartConfig, ChartSeries, ParsingStatus, ChartPreset } from '../types';
-import { Loader2, Wand2, RefreshCw, Grid3X3, FileText, MoveRight, MoveUp, Eye, EyeOff, Save, FolderOpen, Trash2 } from 'lucide-react';
+import { Loader2, Wand2, RefreshCw, Grid3X3, FileText, MoveRight, MoveUp, Eye, EyeOff, Save, FolderOpen, Trash2, Download, Upload } from 'lucide-react';
 import { Spreadsheet } from './Spreadsheet';
 
 interface ControlsProps {
@@ -14,7 +14,12 @@ interface ControlsProps {
   status: ParsingStatus;
 }
 
-const COLORS = ['#2563eb', '#db2777', '#16a34a', '#d97706', '#9333ea', '#0891b2'];
+const COLORS = [
+  '#2563eb', '#db2777', '#16a34a', '#d97706', '#9333ea', '#0891b2',
+  '#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#ec4899',
+  '#06b6d4', '#84cc16', '#f97316', '#6366f1', '#14b8a6', '#a855f7',
+  '#64748b', '#374151', '#fb7185', '#fbbf24', '#4ade80', '#60a5fa'
+];
 
 const Controls: React.FC<ControlsProps> = ({
   inputData,
@@ -53,10 +58,12 @@ const Controls: React.FC<ControlsProps> = ({
   // 创建新预设
   const createPreset = () => {
     if (!newPresetName.trim()) return;
+    // 排除 title, xAxisLabel, yAxisLabel
+    const { title, xAxisLabel, yAxisLabel, ...configToSave } = config;
     const newPreset: ChartPreset = {
       id: Date.now().toString(),
       name: newPresetName.trim(),
-      config: { ...config },
+      config: configToSave as ChartConfig,
       createdAt: Date.now(),
     };
     savePresetsToStorage([...presets, newPreset]);
@@ -65,12 +72,93 @@ const Controls: React.FC<ControlsProps> = ({
 
   // 加载预设
   const loadPreset = (preset: ChartPreset) => {
-    setConfig({ ...preset.config });
+    // 保留当前的 title, xAxisLabel, yAxisLabel
+    const { title, xAxisLabel, yAxisLabel } = config;
+    setConfig({ 
+      ...preset.config,
+      title,
+      xAxisLabel,
+      yAxisLabel
+    });
   };
 
   // 删除预设
   const deletePreset = (id: string) => {
     savePresetsToStorage(presets.filter(p => p.id !== id));
+  };
+
+  // 导出预设
+  const exportPresets = () => {
+    const dataStr = JSON.stringify(presets, null, 2);
+    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(dataBlob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `chart-presets-${Date.now()}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  // 导入预设
+  const presetFileInputRef = useRef<HTMLInputElement>(null);
+  const importPresets = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const importedPresets = JSON.parse(e.target?.result as string) as ChartPreset[];
+        // 合并导入的预设，避免ID冲突
+        const mergedPresets = [...presets];
+        importedPresets.forEach(preset => {
+          // 如果ID已存在，生成新ID
+          if (mergedPresets.find(p => p.id === preset.id)) {
+            preset.id = Date.now().toString() + Math.random();
+          }
+          mergedPresets.push(preset);
+        });
+        savePresetsToStorage(mergedPresets);
+        alert(`成功导入 ${importedPresets.length} 个预设！`);
+      } catch (error) {
+        alert('导入失败：文件格式不正确');
+        console.error('导入预设失败:', error);
+      }
+    };
+    reader.readAsText(file);
+    // 重置input，允许重复导入同一文件
+    if (event.target) event.target.value = '';
+  };
+
+  // 导出数据
+  const exportData = () => {
+    const dataBlob = new Blob([inputData], { type: 'text/plain' });
+    const url = URL.createObjectURL(dataBlob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `chart-data-${Date.now()}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  // 导入数据
+  const dataFileInputRef = useRef<HTMLInputElement>(null);
+  const importData = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const content = e.target?.result as string;
+      setInputData(content);
+    };
+    reader.readAsText(file);
+    // 重置input，允许重复导入同一文件
+    if (event.target) event.target.value = '';
   };
 
   const updateConfig = (key: keyof ChartConfig, value: any) => {
@@ -156,6 +244,33 @@ const Controls: React.FC<ControlsProps> = ({
                 )}
                 {status === ParsingStatus.PARSING ? '生成中...' : '生成图表'}
                 </button>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={exportData}
+                    disabled={!inputData.trim()}
+                    className="flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="导出当前数据"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    导出数据
+                  </button>
+                  <button
+                    onClick={() => dataFileInputRef.current?.click()}
+                    className="flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+                    title="导入数据文件"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    导入数据
+                  </button>
+                  <input
+                    ref={dataFileInputRef}
+                    type="file"
+                    accept=".csv,.txt,.tsv"
+                    onChange={importData}
+                    className="hidden"
+                  />
+                </div>
                 
                 {status === ParsingStatus.ERROR && (
                 <p className="text-sm text-red-500 bg-red-50 p-2 rounded">
@@ -230,6 +345,34 @@ const Controls: React.FC<ControlsProps> = ({
                   ) : (
                     <p className="text-xs text-slate-400 text-center py-2">暂无保存的预设</p>
                   )}
+
+                  {/* 导入导出预设 */}
+                  <div className="flex gap-2 pt-2 border-t border-slate-200">
+                    <button
+                      onClick={exportPresets}
+                      disabled={presets.length === 0}
+                      className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-600 bg-white hover:bg-slate-50 border border-slate-300 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="导出所有预设"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      导出预设
+                    </button>
+                    <button
+                      onClick={() => presetFileInputRef.current?.click()}
+                      className="flex-1 flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-600 bg-white hover:bg-slate-50 border border-slate-300 rounded transition-colors"
+                      title="导入预设文件"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      导入预设
+                    </button>
+                    <input
+                      ref={presetFileInputRef}
+                      type="file"
+                      accept=".json"
+                      onChange={importPresets}
+                      className="hidden"
+                    />
+                  </div>
                 </div>
               )}
             </div>
@@ -269,11 +412,11 @@ const Controls: React.FC<ControlsProps> = ({
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <div className="flex items-center justify-between mb-1">
-                      <label className="text-xs font-medium text-slate-700">X轴标签</label>
+                      <label className="text-xs font-medium text-slate-700">X轴标题</label>
                       <button 
                         onClick={() => updateConfig('showXAxisLabel', !config.showXAxisLabel)}
                         className="text-slate-400 hover:text-indigo-600 transition-colors"
-                        title={config.showXAxisLabel ? "隐藏标签" : "显示标签"}
+                        title={config.showXAxisLabel ? "隐藏标题" : "显示标题"}
                       >
                          {config.showXAxisLabel ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
                       </button>
@@ -331,11 +474,11 @@ const Controls: React.FC<ControlsProps> = ({
                   </div>
                   <div>
                     <div className="flex items-center justify-between mb-1">
-                      <label className="text-xs font-medium text-slate-700">Y轴标签</label>
+                      <label className="text-xs font-medium text-slate-700">Y轴标题</label>
                        <button 
                         onClick={() => updateConfig('showYAxisLabel', !config.showYAxisLabel)}
                         className="text-slate-400 hover:text-indigo-600 transition-colors"
-                        title={config.showYAxisLabel ? "隐藏标签" : "显示标签"}
+                        title={config.showYAxisLabel ? "隐藏标题" : "显示标题"}
                       >
                          {config.showYAxisLabel ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
                       </button>
@@ -539,6 +682,60 @@ const Controls: React.FC<ControlsProps> = ({
                   </div>
                 </div>
 
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">X轴刻度长度</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={20}
+                      value={config.xAxisTickSize}
+                      onChange={(e) => updateConfig('xAxisTickSize', Number(e.target.value) || 6)}
+                      className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded focus:border-indigo-500 outline-none"
+                      placeholder="刻度线长度"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Y轴刻度长度</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={20}
+                      value={config.yAxisTickSize}
+                      onChange={(e) => updateConfig('yAxisTickSize', Number(e.target.value) || 6)}
+                      className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded focus:border-indigo-500 outline-none"
+                      placeholder="刻度线长度"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">X轴刻度标签距离</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={50}
+                      value={config.xAxisTickLabelDistance}
+                      onChange={(e) => updateConfig('xAxisTickLabelDistance', Number(e.target.value) || 0)}
+                      className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded focus:border-indigo-500 outline-none"
+                      placeholder="标签距刻度的距离"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Y轴刻度标签距离</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={50}
+                      value={config.yAxisTickLabelDistance}
+                      onChange={(e) => updateConfig('yAxisTickLabelDistance', Number(e.target.value) || 0)}
+                      className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded focus:border-indigo-500 outline-none"
+                      placeholder="标签距刻度的距离"
+                    />
+                  </div>
+                </div>
+
                 <div className="pt-2 border-t border-slate-100 grid grid-cols-2 gap-2">
                      <label className="flex items-center space-x-2 cursor-pointer">
                         <input
@@ -550,6 +747,34 @@ const Controls: React.FC<ControlsProps> = ({
                         <span className="text-sm text-slate-700">显示数值</span>
                     </label>
                 </div>
+
+                {config.showLabels && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">数值字号</label>
+                      <input
+                        type="number"
+                        min={8}
+                        max={24}
+                        value={config.labelFontSize}
+                        onChange={(e) => updateConfig('labelFontSize', Number(e.target.value) || 11)}
+                        className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded focus:border-indigo-500 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">数值距离</label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={30}
+                        value={config.labelDistance}
+                        onChange={(e) => updateConfig('labelDistance', Number(e.target.value) || 5)}
+                        className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded focus:border-indigo-500 outline-none"
+                        placeholder="距离折线的像素"
+                      />
+                    </div>
+                  </div>
+                )}
                 
                 <div className="pt-2 border-t border-slate-100 space-y-3">
                     <label className="flex items-center space-x-2 cursor-pointer">
@@ -646,17 +871,27 @@ const Controls: React.FC<ControlsProps> = ({
             {/* Series Colors */}
             <div>
               <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">系列颜色</h3>
-              <div className="space-y-2">
+              <div className="space-y-3">
                 {series.map((s, idx) => (
-                  <div key={s.dataKey} className="flex items-center justify-between">
-                    <span className="text-sm text-slate-700 truncate max-w-[100px]">{s.name}</span>
-                    <div className="flex gap-1">
+                  <div key={s.dataKey} className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-slate-700 font-medium truncate max-w-[100px]">{s.name}</span>
+                      <input
+                        type="color"
+                        value={s.color}
+                        onChange={(e) => updateSeriesColor(idx, e.target.value)}
+                        className="h-6 w-12 p-0.5 rounded border border-slate-300 cursor-pointer"
+                        title="自定义颜色"
+                      />
+                    </div>
+                    <div className="flex flex-wrap gap-1">
                       {COLORS.map((c) => (
                         <button
                           key={c}
                           onClick={() => updateSeriesColor(idx, c)}
-                          className={`w-5 h-5 rounded-full border ${s.color === c ? 'border-slate-800 scale-110' : 'border-transparent hover:scale-105'}`}
+                          className={`w-6 h-6 rounded border-2 transition-all ${s.color.toLowerCase() === c.toLowerCase() ? 'border-slate-800 scale-110 shadow-md' : 'border-slate-200 hover:scale-105 hover:border-slate-400'}`}
                           style={{ backgroundColor: c }}
+                          title={c}
                         />
                       ))}
                     </div>

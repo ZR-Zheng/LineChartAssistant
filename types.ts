@@ -46,7 +46,13 @@ export interface ChartConfig {
   yAxisTickInterval: number;
   xAxisTickType: 'inside' | 'outside' | 'cross';
   yAxisTickType: 'inside' | 'outside' | 'cross';
+  xAxisTickSize: number;
+  yAxisTickSize: number;
+  xAxisTickLabelDistance: number;
+  yAxisTickLabelDistance: number;
   showLabels: boolean;
+  labelFontSize: number;
+  labelDistance: number;
 
   // New visibility toggles for axis labels
   showXAxisLabel: boolean;

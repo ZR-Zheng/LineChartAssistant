@@ -27,7 +27,9 @@ const DraggableLabel: React.FC<{
   offset: { dx: number; dy: number };
   onDrag: (key: string, dx: number, dy: number) => void;
   isDraggable: boolean;
-}> = ({ x = 0, y = 0, value, fill, labelKey, offset, onDrag, isDraggable }) => {
+  fontSize: number;
+  distance: number;
+}> = ({ x = 0, y = 0, value, fill, labelKey, offset, onDrag, isDraggable, fontSize, distance }) => {
   const [isDragging, setIsDragging] = useState(false);
   const startPos = useRef({ x: 0, y: 0, offsetX: 0, offsetY: 0 });
 
@@ -61,9 +63,9 @@ const DraggableLabel: React.FC<{
   return (
     <text
       x={x + offset.dx}
-      y={y + offset.dy - 5}
+      y={y + offset.dy - distance}
       fill={fill}
-      fontSize={11}
+      fontSize={fontSize}
       fontWeight={600}
       textAnchor="middle"
       style={{ 
@@ -341,15 +343,19 @@ const ChartDisplay: React.FC<ChartDisplayProps> = ({ data, config, series }) => 
             <XAxis 
               dataKey="label" 
               label={config.showXAxisLabel ? xAxisLabelProps : undefined} 
-              tick={{ fill: config.axisColor, fontSize: xTickFontSize }}
+              tick={{ 
+                fill: config.axisColor, 
+                fontSize: xTickFontSize,
+                dy: config.xAxisTickLabelDistance + (config.xAxisTickType === 'outside' ? 0 : config.xAxisTickType === 'inside' ? -config.xAxisTickSize : -config.xAxisTickSize / 2)
+              }}
               interval={config.xAxisTickInterval}
               minTickGap={8}
               tickLine={{ 
                 stroke: config.axisColor,
-                ...(config.xAxisTickType === 'inside' ? { transform: 'translate(0, -6)' } : {}),
-                ...(config.xAxisTickType === 'cross' ? { transform: 'translate(0, -3)' } : {})
+                ...(config.xAxisTickType === 'inside' ? { transform: `translate(0, -${config.xAxisTickSize})` } : {}),
+                ...(config.xAxisTickType === 'cross' ? { transform: `translate(0, -${config.xAxisTickSize / 2})` } : {})
               }}
-              tickSize={config.xAxisTickType === 'cross' ? 12 : 6}
+              tickSize={config.xAxisTickType === 'cross' ? config.xAxisTickSize * 2 : config.xAxisTickSize}
               axisLine={{ 
                 stroke: config.axisColor, 
                 markerEnd: config.xAxisArrowEnd ? 'url(#arrow)' : undefined,
@@ -360,15 +366,19 @@ const ChartDisplay: React.FC<ChartDisplayProps> = ({ data, config, series }) => 
             
             <YAxis 
               label={config.showYAxisLabel ? yAxisLabelProps : undefined} 
-              tick={{ fill: config.axisColor, fontSize: yTickFontSize }}
+              tick={{ 
+                fill: config.axisColor, 
+                fontSize: yTickFontSize,
+                dx: -(config.yAxisTickLabelDistance + (config.yAxisTickType === 'outside' ? 0 : config.yAxisTickType === 'inside' ? config.yAxisTickSize : config.yAxisTickSize / 2))
+              }}
               tickCount={config.yAxisTickInterval > 0 ? undefined : (config.yAxisTickCount || 5)}
               interval={config.yAxisTickInterval > 0 ? config.yAxisTickInterval : undefined}
               tickLine={{ 
                 stroke: config.axisColor,
-                ...(config.yAxisTickType === 'inside' ? { transform: 'translate(6, 0)' } : {}),
-                ...(config.yAxisTickType === 'cross' ? { transform: 'translate(3, 0)' } : {})
+                ...(config.yAxisTickType === 'inside' ? { transform: `translate(${config.yAxisTickSize}, 0)` } : {}),
+                ...(config.yAxisTickType === 'cross' ? { transform: `translate(${config.yAxisTickSize / 2}, 0)` } : {})
               }}
-              tickSize={config.yAxisTickType === 'cross' ? 12 : 6}
+              tickSize={config.yAxisTickType === 'cross' ? config.yAxisTickSize * 2 : config.yAxisTickSize}
               axisLine={{ 
                 stroke: config.axisColor, 
                 markerEnd: config.yAxisArrowStart ? 'url(#arrow)' : undefined,
@@ -409,6 +419,8 @@ const ChartDisplay: React.FC<ChartDisplayProps> = ({ data, config, series }) => 
                       offset={offset}
                       onDrag={handleLabelDrag}
                       isDraggable={isDraggableMode}
+                      fontSize={config.labelFontSize}
+                      distance={config.labelDistance}
                     />
                   );
                 } : false}

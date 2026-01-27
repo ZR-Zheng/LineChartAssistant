@@ -33,13 +33,19 @@ const DEFAULT_CONFIG: ChartConfig = {
   yAxisTickInterval: 0,
   xAxisTickType: 'outside',
   yAxisTickType: 'outside',
+  xAxisTickSize: 6,
+  yAxisTickSize: 6,
+  xAxisTickLabelDistance: 0,
+  yAxisTickLabelDistance: 0,
   showLabels: false,
+  labelFontSize: 11,
+  labelDistance: 5,
 
   showXAxisLabel: true,
   showYAxisLabel: true,
   
-  xAxisLabelPosition: 'insideBottom',
-  yAxisLabelPosition: 'insideLeft',
+  xAxisLabelPosition: 'rightEnd',
+  yAxisLabelPosition: 'aboveArrow',
   xAxisLabelFontSize: 12,
   yAxisLabelFontSize: 12,
   xAxisLabelOffsetX: 0,
@@ -144,8 +150,8 @@ function App() {
         title: "Chart Title",
         xAxisLabel: headers[0] || "Category",
         yAxisLabel: seriesKeys.length === 1 ? seriesKeys[0] : "Value",
-        xAxisLabelPosition: 'insideBottom',
-        yAxisLabelPosition: 'insideLeft',
+        xAxisLabelPosition: 'rightEnd',
+        yAxisLabelPosition: 'aboveArrow',
       }
     };
   };
