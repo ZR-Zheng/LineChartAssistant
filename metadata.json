@@ -1,0 +1,5 @@
+{
+  "name": "Line Chart Assistant",
+  "description": "An AI-powered line chart generator. Input raw text or data, and it generates interactive, customizable line charts with automated insights.",
+  "requestFramePermissions": []
+}
