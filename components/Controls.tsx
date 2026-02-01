@@ -36,6 +36,9 @@ const Controls: React.FC<ControlsProps> = ({
   const [presets, setPresets] = useState<ChartPreset[]>([]);
   const [newPresetName, setNewPresetName] = useState('');
   const [showPresetPanel, setShowPresetPanel] = useState(false);
+  
+  // 用于防抖颜色输入的ref
+  const colorUpdateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // 从 localStorage 加载预设
   useEffect(() => {
@@ -165,10 +168,31 @@ const Controls: React.FC<ControlsProps> = ({
     setConfig({ ...config, [key]: value });
   };
 
+  // 防抖的颜色更新，避免频繁的状态更新
+  const updateColorDebounced = (key: keyof ChartConfig, value: any) => {
+    if (colorUpdateTimeoutRef.current) {
+      clearTimeout(colorUpdateTimeoutRef.current);
+    }
+    colorUpdateTimeoutRef.current = setTimeout(() => {
+      updateConfig(key, value);
+    }, 100);
+  };
+
   const updateSeriesColor = (index: number, color: string) => {
     const newSeries = [...series];
     newSeries[index].color = color;
     setSeries(newSeries);
+  };
+
+  // 防抖的系列颜色更新
+  const seriesColorTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const updateSeriesColorDebounced = (index: number, color: string) => {
+    if (seriesColorTimeoutRef.current) {
+      clearTimeout(seriesColorTimeoutRef.current);
+    }
+    seriesColorTimeoutRef.current = setTimeout(() => {
+      updateSeriesColor(index, color);
+    }, 100);
   };
 
   return (
@@ -409,132 +433,357 @@ const Controls: React.FC<ControlsProps> = ({
                     <option value='"Courier New", monospace'>Courier New</option>
                   </select>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="text-xs font-medium text-slate-700">X轴标题</label>
-                      <button 
-                        onClick={() => updateConfig('showXAxisLabel', !config.showXAxisLabel)}
-                        className="text-slate-400 hover:text-indigo-600 transition-colors"
-                        title={config.showXAxisLabel ? "隐藏标题" : "显示标题"}
-                      >
-                         {config.showXAxisLabel ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
-                      </button>
-                    </div>
+              </div>
+            </div>
+
+            {/* 图表样式 */}
+            <div>
+              <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">图表样式</h3>
+              <div className="space-y-2">
+                <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                  <label className="flex items-center space-x-2 cursor-pointer">
                     <input
-                      type="text"
-                      value={config.xAxisLabel}
-                      disabled={!config.showXAxisLabel}
-                      onChange={(e) => updateConfig('xAxisLabel', e.target.value)}
-                      className={`w-full px-2 py-1.5 text-sm border rounded focus:border-indigo-500 outline-none transition-colors mb-1 ${!config.showXAxisLabel ? 'bg-slate-50 text-slate-400 border-slate-200' : 'border-slate-300'}`}
+                      type="checkbox"
+                      checked={config.grid}
+                      onChange={(e) => updateConfig('grid', e.target.checked)}
+                      className="rounded text-indigo-600 focus:ring-indigo-500"
                     />
-                    <select
-                        value={config.xAxisLabelPosition}
-                        onChange={(e) => updateConfig('xAxisLabelPosition', e.target.value)}
-                        disabled={!config.showXAxisLabel}
-                        className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded outline-none bg-slate-50 focus:bg-white"
-                    >
-                        <option value="insideBottom">居中 (内侧)</option>
-                        <option value="bottom">居中 (外侧)</option>
-                        <option value="insideBottomLeft">左侧</option>
-                        <option value="insideBottomRight">右侧 (内侧)</option>
-                        <option value="rightBelow">右侧 (轴下方)</option>
-                        <option value="rightEnd">箭头下方 (右端)</option>
-                    </select>
+                    <span className="text-sm text-slate-700">显示网格</span>
+                  </label>
+                  <label className="flex items-center space-x-2 cursor-pointer">
                     <input
-                      type="number"
-                      min={8}
-                      max={24}
-                      value={config.xAxisLabelFontSize}
-                      onChange={(e) => updateConfig('xAxisLabelFontSize', Number(e.target.value) || 12)}
-                      className="w-full px-2 py-1 text-xs border border-slate-300 rounded focus:border-indigo-500 outline-none mt-1"
-                      placeholder="字号"
-                      disabled={!config.showXAxisLabel}
+                      type="checkbox"
+                      checked={config.legend}
+                      onChange={(e) => updateConfig('legend', e.target.checked)}
+                      className="rounded text-indigo-600 focus:ring-indigo-500"
                     />
-                    <div className="grid grid-cols-2 gap-1 mt-1">
-                      <input
-                        type="number"
-                        value={config.xAxisLabelOffsetX}
-                        onChange={(e) => updateConfig('xAxisLabelOffsetX', Number(e.target.value) || 0)}
-                        className="w-full px-2 py-1 text-xs border border-slate-300 rounded focus:border-indigo-500 outline-none"
-                        placeholder="X偏移"
-                        title="水平偏移量"
-                        disabled={!config.showXAxisLabel}
-                      />
-                      <input
-                        type="number"
-                        value={config.xAxisLabelOffsetY}
-                        onChange={(e) => updateConfig('xAxisLabelOffsetY', Number(e.target.value) || 0)}
-                        className="w-full px-2 py-1 text-xs border border-slate-300 rounded focus:border-indigo-500 outline-none"
-                        placeholder="Y偏移"
-                        title="垂直偏移量"
-                        disabled={!config.showXAxisLabel}
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="text-xs font-medium text-slate-700">Y轴标题</label>
-                       <button 
-                        onClick={() => updateConfig('showYAxisLabel', !config.showYAxisLabel)}
-                        className="text-slate-400 hover:text-indigo-600 transition-colors"
-                        title={config.showYAxisLabel ? "隐藏标题" : "显示标题"}
-                      >
-                         {config.showYAxisLabel ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
-                      </button>
-                    </div>
+                    <span className="text-sm text-slate-700">显示图例</span>
+                  </label>
+                  <label className="flex items-center space-x-2 cursor-pointer">
                     <input
-                      type="text"
-                      value={config.yAxisLabel}
-                      disabled={!config.showYAxisLabel}
-                      onChange={(e) => updateConfig('yAxisLabel', e.target.value)}
-                      className={`w-full px-2 py-1.5 text-sm border rounded focus:border-indigo-500 outline-none transition-colors mb-1 ${!config.showYAxisLabel ? 'bg-slate-50 text-slate-400 border-slate-200' : 'border-slate-300'}`}
+                      type="checkbox"
+                      checked={config.dots}
+                      onChange={(e) => updateConfig('dots', e.target.checked)}
+                      className="rounded text-indigo-600 focus:ring-indigo-500"
                     />
-                    <select
-                        value={config.yAxisLabelPosition}
-                        onChange={(e) => updateConfig('yAxisLabelPosition', e.target.value)}
-                        disabled={!config.showYAxisLabel}
-                        className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded outline-none bg-slate-50 focus:bg-white"
-                    >
-                        <option value="insideLeft">居中 (垂直)</option>
-                        <option value="insideTop">顶部 (水平)</option>
-                        <option value="insideTopLeft">左上角</option>
-                        <option value="topAbove">顶部 (轴上方)</option>
-                        <option value="aboveArrow">箭头上方 (水平居中)</option>
-                        <option value="left">居中 (外侧)</option>
-                    </select>
+                    <span className="text-sm text-slate-700">显示数据点</span>
+                  </label>
+                  <label className="flex items-center space-x-2 cursor-pointer">
                     <input
-                      type="number"
-                      min={8}
-                      max={24}
-                      value={config.yAxisLabelFontSize}
-                      onChange={(e) => updateConfig('yAxisLabelFontSize', Number(e.target.value) || 12)}
-                      className="w-full px-2 py-1 text-xs border border-slate-300 rounded focus:border-indigo-500 outline-none mt-1"
-                      placeholder="字号"
-                      disabled={!config.showYAxisLabel}
+                      type="checkbox"
+                      checked={config.smooth}
+                      onChange={(e) => updateConfig('smooth', e.target.checked)}
+                      className="rounded text-indigo-600 focus:ring-indigo-500"
                     />
-                    <div className="grid grid-cols-2 gap-1 mt-1">
-                      <input
-                        type="number"
-                        value={config.yAxisLabelOffsetX}
-                        onChange={(e) => updateConfig('yAxisLabelOffsetX', Number(e.target.value) || 0)}
-                        className="w-full px-2 py-1 text-xs border border-slate-300 rounded focus:border-indigo-500 outline-none"
-                        placeholder="X偏移"
-                        title="水平偏移量"
-                        disabled={!config.showYAxisLabel}
-                      />
-                      <input
-                        type="number"
-                        value={config.yAxisLabelOffsetY}
-                        onChange={(e) => updateConfig('yAxisLabelOffsetY', Number(e.target.value) || 0)}
-                        className="w-full px-2 py-1 text-xs border border-slate-300 rounded focus:border-indigo-500 outline-none"
-                        placeholder="Y偏移"
-                        title="垂直偏移量"
-                        disabled={!config.showYAxisLabel}
-                      />
-                    </div>
-                  </div>
+                    <span className="text-sm text-slate-700">平滑曲线</span>
+                  </label>
                 </div>
+                
+                {/* 数据点设置 */}
+                {config.dots && (
+                  <div className="pt-2 border-t border-slate-100 space-y-2">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">数据点形状</label>
+                        <select
+                          value={config.dotShape || 'circle'}
+                          onChange={(e) => updateConfig('dotShape', e.target.value)}
+                          className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded outline-none bg-slate-50 focus:bg-white"
+                        >
+                          <option value="circle">圆形</option>
+                          <option value="square">方形</option>
+                          <option value="triangle">三角形</option>
+                          <option value="diamond">菱形</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">数据点大小</label>
+                        <input
+                          type="number"
+                          min={2}
+                          max={10}
+                          value={config.dotSize || 4}
+                          onChange={(e) => updateConfig('dotSize', Number(e.target.value) || 4)}
+                          className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded focus:border-indigo-500 outline-none"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <label className="text-sm text-slate-700">填充样式</label>
+                      <div className="flex bg-slate-100 p-0.5 rounded-lg">
+                        <button
+                          onClick={() => updateConfig('dotFilled', true)}
+                          className={`px-2 py-1 text-xs rounded-md transition-all ${config.dotFilled !== false ? 'bg-white shadow text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}
+                        >
+                          实心
+                        </button>
+                        <button
+                          onClick={() => updateConfig('dotFilled', false)}
+                          className={`px-2 py-1 text-xs rounded-md transition-all ${config.dotFilled === false ? 'bg-white shadow text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}
+                        >
+                          空心
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                <div className="pt-2">
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    线条粗细: {config.strokeWidth}px
+                  </label>
+                  <input
+                    type="range"
+                    min="1"
+                    max="5"
+                    step="0.5"
+                    value={config.strokeWidth}
+                    onChange={(e) => updateConfig('strokeWidth', parseFloat(e.target.value))}
+                    className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* 数值标签 */}
+            <div>
+              <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">数值标签</h3>
+              <div className="space-y-3">
+                <label className="flex items-center space-x-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={config.showLabels}
+                    onChange={(e) => updateConfig('showLabels', e.target.checked)}
+                    className="rounded text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span className="text-sm text-slate-700">显示数值标签</span>
+                </label>
+                {config.showLabels && (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">数值字号</label>
+                        <input
+                          type="number"
+                          min={8}
+                          max={24}
+                          value={config.labelFontSize}
+                          onChange={(e) => updateConfig('labelFontSize', Number(e.target.value) || 11)}
+                          className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded focus:border-indigo-500 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">数值距离</label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={30}
+                          value={config.labelDistance}
+                          onChange={(e) => updateConfig('labelDistance', Number(e.target.value) || 5)}
+                          className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded focus:border-indigo-500 outline-none"
+                          placeholder="距离折线的像素"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">水平偏移</label>
+                        <input
+                          type="number"
+                          min={-50}
+                          max={50}
+                          value={config.labelOffsetX || 0}
+                          onChange={(e) => updateConfig('labelOffsetX', Number(e.target.value) || 0)}
+                          className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded focus:border-indigo-500 outline-none"
+                          placeholder="像素"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">垂直偏移</label>
+                        <input
+                          type="number"
+                          min={-50}
+                          max={50}
+                          value={config.labelOffsetY || 0}
+                          onChange={(e) => updateConfig('labelOffsetY', Number(e.target.value) || 0)}
+                          className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded focus:border-indigo-500 outline-none"
+                          placeholder="像素"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* X轴标题设置 */}
+            <div>
+              <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">X轴标题</h3>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm text-slate-700">显示X轴标题</label>
+                  <button 
+                    onClick={() => updateConfig('showXAxisLabel', !config.showXAxisLabel)}
+                    className={`p-1.5 rounded transition-colors ${config.showXAxisLabel ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-400'}`}
+                    title={config.showXAxisLabel ? "隐藏标题" : "显示标题"}
+                  >
+                    {config.showXAxisLabel ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                  </button>
+                </div>
+                {config.showXAxisLabel && (
+                  <>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">标题文字</label>
+                      <input
+                        type="text"
+                        value={config.xAxisLabel}
+                        onChange={(e) => updateConfig('xAxisLabel', e.target.value)}
+                        className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded focus:border-indigo-500 outline-none"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">位置</label>
+                        <select
+                          value={config.xAxisLabelPosition}
+                          onChange={(e) => updateConfig('xAxisLabelPosition', e.target.value)}
+                          className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded outline-none bg-slate-50 focus:bg-white"
+                        >
+                          <option value="left">左侧</option>
+                          <option value="center">居中</option>
+                          <option value="right">右侧</option>
+                          <option value="axisLabelRight">轴标签右侧</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">字号</label>
+                        <input
+                          type="number"
+                          min={8}
+                          max={24}
+                          value={config.xAxisLabelFontSize}
+                          onChange={(e) => updateConfig('xAxisLabelFontSize', Number(e.target.value) || 12)}
+                          className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded focus:border-indigo-500 outline-none"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">X偏移</label>
+                        <input
+                          type="number"
+                          value={config.xAxisLabelOffsetX}
+                          onChange={(e) => updateConfig('xAxisLabelOffsetX', Number(e.target.value) || 0)}
+                          className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded focus:border-indigo-500 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">Y偏移</label>
+                        <input
+                          type="number"
+                          value={config.xAxisLabelOffsetY}
+                          onChange={(e) => updateConfig('xAxisLabelOffsetY', Number(e.target.value) || 0)}
+                          className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded focus:border-indigo-500 outline-none"
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Y轴标题设置 */}
+            <div>
+              <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Y轴标题</h3>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm text-slate-700">显示Y轴标题</label>
+                  <button 
+                    onClick={() => updateConfig('showYAxisLabel', !config.showYAxisLabel)}
+                    className={`p-1.5 rounded transition-colors ${config.showYAxisLabel ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-400'}`}
+                    title={config.showYAxisLabel ? "隐藏标题" : "显示标题"}
+                  >
+                    {config.showYAxisLabel ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                  </button>
+                </div>
+                {config.showYAxisLabel && (
+                  <>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">标题文字</label>
+                      <input
+                        type="text"
+                        value={config.yAxisLabel}
+                        onChange={(e) => updateConfig('yAxisLabel', e.target.value)}
+                        className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded focus:border-indigo-500 outline-none"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">位置</label>
+                        <select
+                          value={config.yAxisLabelPosition}
+                          onChange={(e) => updateConfig('yAxisLabelPosition', e.target.value)}
+                          className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded outline-none bg-slate-50 focus:bg-white"
+                        >
+                          <option value="top">顶部</option>
+                          <option value="center">居中</option>
+                          <option value="bottom">底部</option>
+                          <option value="yAxisTop">Y轴顶部</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">字号</label>
+                        <input
+                          type="number"
+                          min={8}
+                          max={24}
+                          value={config.yAxisLabelFontSize}
+                          onChange={(e) => updateConfig('yAxisLabelFontSize', Number(e.target.value) || 12)}
+                          className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded focus:border-indigo-500 outline-none"
+                        />
+                      </div>
+                    </div>
+                    {config.yAxisLabelPosition !== 'yAxisTop' && (
+                      <div className="flex items-center justify-between">
+                        <label className="text-sm text-slate-700">文字排列方向</label>
+                        <div className="flex bg-slate-100 p-0.5 rounded-lg">
+                          <button
+                            onClick={() => updateConfig('yAxisLabelVertical', false)}
+                            className={`px-2 py-1 text-xs rounded-md transition-all ${!config.yAxisLabelVertical ? 'bg-white shadow text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}
+                          >
+                            水平
+                          </button>
+                          <button
+                            onClick={() => updateConfig('yAxisLabelVertical', true)}
+                            className={`px-2 py-1 text-xs rounded-md transition-all ${config.yAxisLabelVertical ? 'bg-white shadow text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}
+                          >
+                            竖直
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">X偏移</label>
+                        <input
+                          type="number"
+                          value={config.yAxisLabelOffsetX}
+                          onChange={(e) => updateConfig('yAxisLabelOffsetX', Number(e.target.value) || 0)}
+                          className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded focus:border-indigo-500 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">Y偏移</label>
+                        <input
+                          type="number"
+                          value={config.yAxisLabelOffsetY}
+                          onChange={(e) => updateConfig('yAxisLabelOffsetY', Number(e.target.value) || 0)}
+                          className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded focus:border-indigo-500 outline-none"
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 
@@ -547,8 +796,8 @@ const Controls: React.FC<ControlsProps> = ({
                     <label className="text-sm text-slate-700">轴颜色</label>
                     <input 
                         type="color" 
-                        value={config.axisColor} 
-                        onChange={(e) => updateConfig('axisColor', e.target.value)}
+                        value={config.axisColor}
+                        onChange={(e) => updateColorDebounced('axisColor', e.target.value)}
                         className="h-8 w-14 p-1 rounded border border-slate-300 cursor-pointer"
                     />
                 </div>
@@ -736,46 +985,6 @@ const Controls: React.FC<ControlsProps> = ({
                   </div>
                 </div>
 
-                <div className="pt-2 border-t border-slate-100 grid grid-cols-2 gap-2">
-                     <label className="flex items-center space-x-2 cursor-pointer">
-                        <input
-                            type="checkbox"
-                            checked={config.showLabels}
-                            onChange={(e) => updateConfig('showLabels', e.target.checked)}
-                            className="rounded text-indigo-600 focus:ring-indigo-500"
-                        />
-                        <span className="text-sm text-slate-700">显示数值</span>
-                    </label>
-                </div>
-
-                {config.showLabels && (
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">数值字号</label>
-                      <input
-                        type="number"
-                        min={8}
-                        max={24}
-                        value={config.labelFontSize}
-                        onChange={(e) => updateConfig('labelFontSize', Number(e.target.value) || 11)}
-                        className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded focus:border-indigo-500 outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">数值距离</label>
-                      <input
-                        type="number"
-                        min={0}
-                        max={30}
-                        value={config.labelDistance}
-                        onChange={(e) => updateConfig('labelDistance', Number(e.target.value) || 5)}
-                        className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded focus:border-indigo-500 outline-none"
-                        placeholder="距离折线的像素"
-                      />
-                    </div>
-                  </div>
-                )}
-                
                 <div className="pt-2 border-t border-slate-100 space-y-3">
                     <label className="flex items-center space-x-2 cursor-pointer">
                         <input
@@ -811,63 +1020,6 @@ const Controls: React.FC<ControlsProps> = ({
               </div>
             </div>
 
-            {/* Appearance */}
-            <div>
-              <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">图表样式</h3>
-              <div className="space-y-2">
-                <label className="flex items-center space-x-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={config.grid}
-                    onChange={(e) => updateConfig('grid', e.target.checked)}
-                    className="rounded text-indigo-600 focus:ring-indigo-500"
-                  />
-                  <span className="text-sm text-slate-700">显示网格</span>
-                </label>
-                <label className="flex items-center space-x-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={config.legend}
-                    onChange={(e) => updateConfig('legend', e.target.checked)}
-                    className="rounded text-indigo-600 focus:ring-indigo-500"
-                  />
-                  <span className="text-sm text-slate-700">显示图例</span>
-                </label>
-                <label className="flex items-center space-x-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={config.dots}
-                    onChange={(e) => updateConfig('dots', e.target.checked)}
-                    className="rounded text-indigo-600 focus:ring-indigo-500"
-                  />
-                  <span className="text-sm text-slate-700">显示数据点</span>
-                </label>
-                <label className="flex items-center space-x-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={config.smooth}
-                    onChange={(e) => updateConfig('smooth', e.target.checked)}
-                    className="rounded text-indigo-600 focus:ring-indigo-500"
-                  />
-                  <span className="text-sm text-slate-700">平滑曲线</span>
-                </label>
-              </div>
-              <div className="mt-4">
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  线条粗细: {config.strokeWidth}px
-                </label>
-                <input
-                  type="range"
-                  min="1"
-                  max="5"
-                  step="0.5"
-                  value={config.strokeWidth}
-                  onChange={(e) => updateConfig('strokeWidth', parseFloat(e.target.value))}
-                  className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-                />
-              </div>
-            </div>
-
             {/* Series Colors */}
             <div>
               <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">系列颜色</h3>
@@ -879,7 +1031,7 @@ const Controls: React.FC<ControlsProps> = ({
                       <input
                         type="color"
                         value={s.color}
-                        onChange={(e) => updateSeriesColor(idx, e.target.value)}
+                        onChange={(e) => updateSeriesColorDebounced(idx, e.target.value)}
                         className="h-6 w-12 p-0.5 rounded border border-slate-300 cursor-pointer"
                         title="自定义颜色"
                       />

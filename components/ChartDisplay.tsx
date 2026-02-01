@@ -17,6 +17,64 @@ interface LabelOffset {
   [key: string]: { dx: number; dy: number };
 }
 
+// 自定义数据点形状组件
+const CustomDot: React.FC<{
+  cx?: number;
+  cy?: number;
+  fill: string;
+  stroke: string;
+  strokeWidth: number;
+  size: number;
+  shape: 'circle' | 'square' | 'triangle' | 'diamond';
+}> = ({ cx = 0, cy = 0, fill, stroke, strokeWidth, size, shape }) => {
+  switch (shape) {
+    case 'square':
+      return (
+        <rect
+          x={cx - size}
+          y={cy - size}
+          width={size * 2}
+          height={size * 2}
+          fill={fill}
+          stroke={stroke}
+          strokeWidth={strokeWidth}
+        />
+      );
+    case 'triangle':
+      const trianglePoints = `${cx},${cy - size} ${cx - size},${cy + size} ${cx + size},${cy + size}`;
+      return (
+        <polygon
+          points={trianglePoints}
+          fill={fill}
+          stroke={stroke}
+          strokeWidth={strokeWidth}
+        />
+      );
+    case 'diamond':
+      const diamondPoints = `${cx},${cy - size} ${cx + size},${cy} ${cx},${cy + size} ${cx - size},${cy}`;
+      return (
+        <polygon
+          points={diamondPoints}
+          fill={fill}
+          stroke={stroke}
+          strokeWidth={strokeWidth}
+        />
+      );
+    case 'circle':
+    default:
+      return (
+        <circle
+          cx={cx}
+          cy={cy}
+          r={size}
+          fill={fill}
+          stroke={stroke}
+          strokeWidth={strokeWidth}
+        />
+      );
+  }
+};
+
 // 自定义可拖动标签组件
 const DraggableLabel: React.FC<{
   x?: number;
@@ -29,7 +87,8 @@ const DraggableLabel: React.FC<{
   isDraggable: boolean;
   fontSize: number;
   distance: number;
-}> = ({ x = 0, y = 0, value, fill, labelKey, offset, onDrag, isDraggable, fontSize, distance }) => {
+  alwaysShow?: boolean;
+}> = ({ x = 0, y = 0, value, fill, labelKey, offset, onDrag, isDraggable, fontSize, distance, alwaysShow }) => {
   const [isDragging, setIsDragging] = useState(false);
   const startPos = useRef({ x: 0, y: 0, offsetX: 0, offsetY: 0 });
 
@@ -71,6 +130,9 @@ const DraggableLabel: React.FC<{
       style={{ 
         cursor: isDraggable ? (isDragging ? 'grabbing' : 'grab') : 'default',
         userSelect: 'none',
+        // 在拖动模式下添加视觉提示
+        opacity: isDraggable ? 1 : 1,
+        filter: isDragging ? 'drop-shadow(0 0 2px rgba(99, 102, 241, 0.8))' : 'none',
       }}
       onMouseDown={handleMouseDown}
     >
@@ -108,7 +170,43 @@ const ChartDisplay: React.FC<ChartDisplayProps> = ({ data, config, series }) => 
       const svg = chartRef.current.querySelector('svg');
       if (!svg) return;
 
-      const svgData = new XMLSerializer().serializeToString(svg);
+      // 克隆SVG以避免修改原始元素
+      const clonedSvg = svg.cloneNode(true) as SVGSVGElement;
+      
+      // 获取SVG的实际尺寸
+      const svgRect = svg.getBoundingClientRect();
+      const svgWidth = svgRect.width || svg.clientWidth || 800;
+      const svgHeight = svgRect.height || svg.clientHeight || 400;
+      
+      // 设置克隆SVG的正确尺寸和viewBox
+      clonedSvg.setAttribute('width', String(svgWidth));
+      clonedSvg.setAttribute('height', String(svgHeight));
+      if (!clonedSvg.getAttribute('viewBox')) {
+        clonedSvg.setAttribute('viewBox', `0 0 ${svgWidth} ${svgHeight}`);
+      }
+      
+      // 添加必要的命名空间
+      clonedSvg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+      clonedSvg.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+      
+      // 将计算样式内联到SVG元素中（确保图例等元素正确导出）
+      const applyInlineStyles = (element: Element) => {
+        const computedStyle = window.getComputedStyle(element as HTMLElement);
+        const originalElement = svg.querySelector(`[class="${element.getAttribute('class')}"]`);
+        if (originalElement) {
+          const origStyle = window.getComputedStyle(originalElement as HTMLElement);
+          // 仅对文本元素应用字体样式
+          if (element.tagName === 'text' || element.tagName === 'tspan') {
+            (element as HTMLElement).style.fontFamily = origStyle.fontFamily;
+            (element as HTMLElement).style.fontSize = origStyle.fontSize;
+            (element as HTMLElement).style.fontWeight = origStyle.fontWeight;
+          }
+        }
+        Array.from(element.children).forEach(child => applyInlineStyles(child));
+      };
+      applyInlineStyles(clonedSvg);
+
+      const svgData = new XMLSerializer().serializeToString(clonedSvg);
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
@@ -122,8 +220,8 @@ const ChartDisplay: React.FC<ChartDisplayProps> = ({ data, config, series }) => 
         const titleHeight = config.title ? 50 : 0;
         const padding = 20;
         
-        canvas.width = (img.width + padding * 2) * scale;
-        canvas.height = (img.height + titleHeight + padding * 2) * scale;
+        canvas.width = (svgWidth + padding * 2) * scale;
+        canvas.height = (svgHeight + titleHeight + padding * 2) * scale;
         ctx.scale(scale, scale);
         
         // 填充白色背景
@@ -135,11 +233,11 @@ const ChartDisplay: React.FC<ChartDisplayProps> = ({ data, config, series }) => 
           ctx.fillStyle = '#1e293b';
           ctx.font = `bold 20px ${config.fontFamily}`;
           ctx.textAlign = 'center';
-          ctx.fillText(config.title, (img.width + padding * 2) / 2, padding + 25);
+          ctx.fillText(config.title, (svgWidth + padding * 2) / 2, padding + 25);
         }
         
-        // 绘制图表
-        ctx.drawImage(img, padding, titleHeight + padding);
+        // 绘制图表（SVG已包含图例）
+        ctx.drawImage(img, padding, titleHeight + padding, svgWidth, svgHeight);
         URL.revokeObjectURL(url);
 
         const pngUrl = canvas.toDataURL('image/png');
@@ -155,7 +253,7 @@ const ChartDisplay: React.FC<ChartDisplayProps> = ({ data, config, series }) => 
     } catch (error) {
       console.error('导出PNG失败:', error);
     }
-  }, [config.title]);
+  }, [config.title, config.fontFamily]);
 
   if (!data || data.length === 0) {
     return (
@@ -170,11 +268,11 @@ const ChartDisplay: React.FC<ChartDisplayProps> = ({ data, config, series }) => 
   // If arrow is present at end, we add padding to the end side.
   const xAxisPadding = { 
     left: config.xAxisArrowStart ? 20 : 10, 
-    right: config.xAxisArrowEnd ? 30 : 10 
+    right: config.xAxisArrowEnd ? 30 : (config.xAxisLabelPosition === 'axisLabelRight' ? 50 : 10)
   };
   
   const yAxisPadding = { 
-    top: config.yAxisArrowStart ? 20 : 10, 
+    top: config.yAxisArrowStart ? 20 : (config.yAxisLabelPosition === 'yAxisTop' ? 35 : 10), 
     bottom: config.yAxisArrowEnd ? 30 : 10 
   };
 
@@ -184,8 +282,12 @@ const ChartDisplay: React.FC<ChartDisplayProps> = ({ data, config, series }) => 
   const yLabelFontSize = config.yAxisLabelFontSize || 12;
 
   // --- X-Axis Label Configuration ---
+  // 规范化的位置选项: left (左侧), center (居中), right (右侧), axisLabelRight (轴标签右侧)
   const xOffsetX = config.xAxisLabelOffsetX || 0;
   const xOffsetY = config.xAxisLabelOffsetY || 0;
+  
+  // 计算X轴标签的基础偏移，根据是否有箭头来调整
+  const xAxisLabelBaseOffset = config.xAxisArrowEnd ? 0 : 15;
   
   let xAxisLabelProps: any = {
     value: config.xAxisLabel,
@@ -194,82 +296,121 @@ const ChartDisplay: React.FC<ChartDisplayProps> = ({ data, config, series }) => 
     style: { fontFamily: config.fontFamily },
   };
 
-  if (config.xAxisLabelPosition === 'rightBelow') {
-    // Custom position: Below the right end of the axis
-    xAxisLabelProps = {
-      ...xAxisLabelProps,
-      position: 'insideBottomRight',
-      dy: 10 + xOffsetY,
-      dx: xOffsetX,
-      offset: 0,
-    };
-  } else if (config.xAxisLabelPosition === 'rightEnd') {
-    // New position: Right of the last tick, aligned with X axis ticks, below arrow
-    xAxisLabelProps = {
-      ...xAxisLabelProps,
-      position: 'right',
-      dy: -2 + xOffsetY,
-      dx: -8 + xOffsetX,
-      offset: 0,
-    };
-  } else {
-    // Standard positions
-    xAxisLabelProps = {
-      ...xAxisLabelProps,
-      position: config.xAxisLabelPosition as any,
-      offset: config.xAxisLabelPosition === 'insideBottom' ? -10 : 0,
-      dy: xOffsetY,
-      dx: xOffsetX,
-    };
+  switch (config.xAxisLabelPosition) {
+    case 'left':
+      xAxisLabelProps = {
+        ...xAxisLabelProps,
+        position: 'insideBottomLeft',
+        dy: 10 + xOffsetY,
+        dx: xOffsetX,
+        offset: 0,
+      };
+      break;
+    case 'center':
+      xAxisLabelProps = {
+        ...xAxisLabelProps,
+        position: 'insideBottom',
+        dy: 10 + xOffsetY,
+        dx: xOffsetX,
+        offset: 0,
+      };
+      break;
+    case 'right':
+      xAxisLabelProps = {
+        ...xAxisLabelProps,
+        position: 'insideBottomRight',
+        dy: 10 + xOffsetY,
+        dx: xOffsetX,
+        offset: 0,
+      };
+      break;
+    case 'axisLabelRight':
+    default:
+      // 轴标签右侧 - 在最后一个刻度标签的右边
+      xAxisLabelProps = {
+        ...xAxisLabelProps,
+        position: 'right',
+        dy: -2 + xOffsetY,
+        dx: -8 + xAxisLabelBaseOffset + xOffsetX,
+        offset: 0,
+      };
+      break;
   }
 
 
   // --- Y-Axis Label Configuration ---
+  // 规范化的位置选项: top (顶部), center (居中), bottom (底部), yAxisTop (Y轴顶部)
   const yOffsetX = config.yAxisLabelOffsetX || 0;
   const yOffsetY = config.yAxisLabelOffsetY || 0;
-  const isYLabelHorizontal = config.yAxisLabelPosition === 'insideTop' || config.yAxisLabelPosition === 'insideTopLeft' || config.yAxisLabelPosition === 'topAbove' || config.yAxisLabelPosition === 'aboveArrow';
+  
+  // 判断是否使用水平排列（仅对 yAxisTop 生效，其他位置根据 yAxisLabelVertical 决定）
+  const isYAxisTopPosition = config.yAxisLabelPosition === 'yAxisTop';
+  const isYLabelHorizontal = isYAxisTopPosition || !config.yAxisLabelVertical;
+  
+  // 计算Y轴标签的基础偏移，根据是否有箭头和文字方向来调整
+  const yAxisLabelBaseOffset = config.yAxisArrowStart ? -15 : 0;
+  
+  // 计算垂直排列时需要的额外偏移，防止和轴标签重叠
+  const verticalTextExtraOffset = config.yAxisLabelVertical ? -15 : 0;
   
   let yAxisLabelProps: any = {
     value: config.yAxisLabel,
     fill: config.axisColor,
-    angle: isYLabelHorizontal ? 0 : -90,
     fontSize: yLabelFontSize,
     style: { fontFamily: config.fontFamily },
   };
 
-  if (config.yAxisLabelPosition === 'topAbove') {
-    // Custom position: Above the top arrow, centered
-    yAxisLabelProps = {
-      ...yAxisLabelProps,
-      position: 'insideTopLeft',
-      dy: -25 + yOffsetY,
-      dx: 0 + yOffsetX,
-      textAnchor: 'middle',
-    };
-  } else if (config.yAxisLabelPosition === 'aboveArrow') {
-    // New position: Above Y axis arrow, horizontal, centered vertically above arrow
-    yAxisLabelProps = {
-      ...yAxisLabelProps,
-      position: 'insideTop',
-      dy: -30 + yOffsetY,
-      dx: 20 + yOffsetX,
-      textAnchor: 'middle',
-      angle: 0,
-    };
-  } else {
-    // Standard positions
-    yAxisLabelProps = {
-      ...yAxisLabelProps,
-      position: config.yAxisLabelPosition as any,
-      offset: config.yAxisLabelPosition === 'insideTop' ? -15 : 0,
-      dy: yOffsetY,
-      dx: yOffsetX,
-    };
+  // Y轴标题水平基础偏移量（统一使用bottom位置的偏移量作为基准）
+  const yAxisLabelBaseDx = config.yAxisLabelVertical ? -25 : 15;
+
+  switch (config.yAxisLabelPosition) {
+    case 'top':
+      yAxisLabelProps = {
+        ...yAxisLabelProps,
+        position: 'insideTop',
+        angle: config.yAxisLabelVertical ? -90 : 0,
+        dy: yAxisLabelBaseOffset + (config.yAxisLabelVertical ? 0 : -5) + (config.yAxisLabelVertical ? yOffsetX : yOffsetY),
+        dx: yAxisLabelBaseDx + (config.yAxisLabelVertical ? yOffsetY : yOffsetX),
+        textAnchor: config.yAxisLabelVertical ? 'middle' : 'start',
+      };
+      break;
+    case 'center':
+      yAxisLabelProps = {
+        ...yAxisLabelProps,
+        position: 'insideLeft',
+        angle: config.yAxisLabelVertical ? -90 : 0,
+        dy: (config.yAxisLabelVertical ? 0 : 0) + (config.yAxisLabelVertical ? yOffsetX : yOffsetY),
+        dx: yAxisLabelBaseDx + (config.yAxisLabelVertical ? yOffsetY : yOffsetX),
+        textAnchor: 'middle',
+      };
+      break;
+    case 'bottom':
+      yAxisLabelProps = {
+        ...yAxisLabelProps,
+        position: 'insideBottomLeft',
+        angle: config.yAxisLabelVertical ? -90 : 0,
+        dy: (config.yAxisLabelVertical ? 0 : 5) + (config.yAxisLabelVertical ? yOffsetX : yOffsetY),
+        dx: yAxisLabelBaseDx + (config.yAxisLabelVertical ? yOffsetY : yOffsetX),
+        textAnchor: config.yAxisLabelVertical ? 'middle' : 'start',
+      };
+      break;
+    case 'yAxisTop':
+    default:
+      // Y轴顶部 - 在Y轴箭头上方，水平显示
+      yAxisLabelProps = {
+        ...yAxisLabelProps,
+        position: 'insideTop',
+        dy: (config.yAxisArrowStart ? -40 : -25) + (config.yAxisLabelVertical ? yOffsetX : yOffsetY),
+        dx: 20 + (config.yAxisLabelVertical ? yOffsetY : yOffsetX),
+        textAnchor: 'middle',
+        angle: 0,
+      };
+      break;
   }
 
 
   return (
-    <div className="w-full h-[400px] sm:h-[500px] bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col">
+    <div className="w-full flex flex-col bg-white p-4 rounded-xl border border-slate-200 shadow-sm" style={{ height: '500px' }}>
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
           {config.showLabels && (
@@ -309,13 +450,13 @@ const ChartDisplay: React.FC<ChartDisplayProps> = ({ data, config, series }) => 
         </button>
       </div>
       
-      <div className="flex-1 w-full min-h-0" ref={chartRef} style={{ fontFamily: config.fontFamily }}>
+      <div className="flex-1 w-full h-full" ref={chartRef} style={{ fontFamily: config.fontFamily, minHeight: 0 }}>
         <ResponsiveContainer width="100%" height="100%">
           <LineChart
             data={data}
             margin={{
-              top: 30, // Increased top margin to accommodate 'topAbove' label
-              right: 30,
+              top: config.legend ? 50 : 30,
+              right: config.xAxisLabelPosition === 'axisLabelRight' && !config.xAxisArrowEnd ? 60 : 30,
               left: 20,
               bottom: 25,
             }}
@@ -406,21 +547,37 @@ const ChartDisplay: React.FC<ChartDisplayProps> = ({ data, config, series }) => 
                 name={s.name}
                 stroke={s.color}
                 strokeWidth={config.strokeWidth}
-                activeDot={{ r: 8 }}
-                dot={config.dots ? { r: 4 } : false}
-                label={config.showLabels ? (props: any) => {
+                activeDot={{ r: (config.dotSize || 4) + 4 }}
+                dot={config.dots ? (props: any) => (
+                  <CustomDot
+                    cx={props.cx}
+                    cy={props.cy}
+                    size={config.dotSize || 4}
+                    shape={config.dotShape || 'circle'}
+                    fill={config.dotFilled ? s.color : '#fff'}
+                    stroke={s.color}
+                    strokeWidth={config.dotFilled ? 0 : 2}
+                  />
+                ) : false}
+                label={(config.showLabels || isDraggableMode) ? (props: any) => {
                   const labelKey = `${s.dataKey}-${props.index}`;
                   const offset = labelOffsets[labelKey] || { dx: 0, dy: 0 };
+                  // 应用整体偏移量
+                  const totalOffset = {
+                    dx: offset.dx + (config.labelOffsetX || 0),
+                    dy: offset.dy + (config.labelOffsetY || 0)
+                  };
                   return (
                     <DraggableLabel
                       {...props}
                       fill={s.color}
                       labelKey={labelKey}
-                      offset={offset}
+                      offset={totalOffset}
                       onDrag={handleLabelDrag}
                       isDraggable={isDraggableMode}
                       fontSize={config.labelFontSize}
                       distance={config.labelDistance}
+                      alwaysShow={isDraggableMode}
                     />
                   );
                 } : false}

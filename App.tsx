@@ -8,17 +8,20 @@ const DEFAULT_CONFIG: ChartConfig = {
   title: 'Chart Title',
   xAxisLabel: 'Category',
   yAxisLabel: 'Value',
-  grid: true,
+  grid: false,
   dots: true,
+  dotShape: 'circle',
+  dotFilled: true,
+  dotSize: 4,
   strokeWidth: 2,
-  smooth: true,
-  legend: true,
+  smooth: false,
+  legend: false,
   axisColor: '#64748b', // Slate-500
   
   xAxisArrowStart: false,
-  xAxisArrowEnd: false,
+  xAxisArrowEnd: true, // 默认打开X轴终点箭头
   yAxisArrowStart: false,
-  yAxisArrowEnd: true, // Defaulting Y axis to have an upward arrow usually
+  yAxisArrowEnd: true, // 默认打开Y轴终点箭头
   
   xAxisStartZero: false,
   yAxisStartZero: true,
@@ -37,21 +40,24 @@ const DEFAULT_CONFIG: ChartConfig = {
   yAxisTickSize: 6,
   xAxisTickLabelDistance: 0,
   yAxisTickLabelDistance: 0,
-  showLabels: false,
+  showLabels: true,
   labelFontSize: 11,
   labelDistance: 5,
+  labelOffsetX: 0,
+  labelOffsetY: 0,
 
   showXAxisLabel: true,
   showYAxisLabel: true,
   
-  xAxisLabelPosition: 'rightEnd',
-  yAxisLabelPosition: 'aboveArrow',
+  xAxisLabelPosition: 'axisLabelRight', // 默认：轴标签右侧
+  yAxisLabelPosition: 'yAxisTop', // 默认：Y轴顶部
   xAxisLabelFontSize: 12,
   yAxisLabelFontSize: 12,
   xAxisLabelOffsetX: 0,
   xAxisLabelOffsetY: 0,
   yAxisLabelOffsetX: 0,
   yAxisLabelOffsetY: 0,
+  yAxisLabelVertical: false, // 默认水平排列
   fontFamily: '"Source Han Sans SC", "Noto Sans SC", "Microsoft YaHei", sans-serif',
 };
 
@@ -150,8 +156,8 @@ function App() {
         title: "Chart Title",
         xAxisLabel: headers[0] || "Category",
         yAxisLabel: seriesKeys.length === 1 ? seriesKeys[0] : "Value",
-        xAxisLabelPosition: 'rightEnd',
-        yAxisLabelPosition: 'aboveArrow',
+        xAxisLabelPosition: 'axisLabelRight',
+        yAxisLabelPosition: 'yAxisTop',
       }
     };
   };

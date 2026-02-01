@@ -22,6 +22,9 @@ export interface ChartConfig {
   yAxisLabel: string;
   grid: boolean;
   dots: boolean;
+  dotShape: 'circle' | 'square' | 'triangle' | 'diamond';
+  dotFilled: boolean;
+  dotSize: number;
   strokeWidth: number;
   smooth: boolean;
   legend: boolean;
@@ -53,6 +56,8 @@ export interface ChartConfig {
   showLabels: boolean;
   labelFontSize: number;
   labelDistance: number;
+  labelOffsetX: number;
+  labelOffsetY: number;
 
   // New visibility toggles for axis labels
   showXAxisLabel: boolean;
@@ -67,6 +72,9 @@ export interface ChartConfig {
   xAxisLabelOffsetY: number;
   yAxisLabelOffsetX: number;
   yAxisLabelOffsetY: number;
+  
+  // Y-axis label orientation
+  yAxisLabelVertical: boolean; // true = vertical text, false = horizontal
   
   // Font settings
   fontFamily: string;
