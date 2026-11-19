@@ -496,19 +496,19 @@ function App() {
           </label>
         )}
         {mark && <button className="icon-button" aria-label="删除标注" title="删除标注" onClick={removeSelection}><Trash2 size={17} /></button>}
-        {tool === 'line' && stats && hasAxes && (
+        {tool === 'line' && hasAxes && (stats || chart.series.length > 1) && (
           <div className="statistic-options" role="group" aria-label="统计参考线">
-            {!seriesField && chart.series.length > 1 && (
-              <select aria-label="统计参考线的数据系列" value={activeSeries} onChange={event => setSelectedSeries(Number(event.target.value))}>
+            {chart.series.length > 1 && (
+              <select aria-label="统计参考线的数据系列" value={activeSeries} onChange={event => selectSeries(Number(event.target.value))}>
                 {chart.series.map((series, index) => <option key={index} value={index}>{series.name}</option>)}
               </select>
             )}
-            {STATISTICS.map(stat => (
+            {stats ? STATISTICS.map(stat => (
               <button className="button compact" key={stat} disabled={!scale?.includes(stats[stat])} onClick={() => addStatistic(stat)}
                 title={scale?.includes(stats[stat]) ? `添加${STATISTIC_LABELS[stat]}参考线` : '超出纵轴范围'}>
                 {STATISTIC_LABELS[stat]} {formatValue(stats[stat])}
               </button>
-            ))}
+            )) : <span className="data-entry-hint" role="status">该系列暂无数据</span>}
           </div>
         )}
       </div>
