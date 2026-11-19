@@ -11,6 +11,7 @@ import ColorPicker from './components/ColorPicker';
 import DataPanel from './components/DataPanel';
 import { AxisSelectionToolbar, DataSelectionToolbar } from './components/SelectionToolbar';
 import TextToolbar from './components/TextToolbar';
+import ToolbarStrip from './components/ToolbarStrip';
 import { boardReducer, initialWorkspace } from './boards';
 import { formatValue, getPlot, getScale, getSeriesStyle, getTextStyle, isNote, MAX_MANUAL_TICKS, removeNote, setChartValue,
   STATISTIC_LABELS, statistics, visibleMark } from './chart';
@@ -238,7 +239,7 @@ function App() {
         removeSelection();
       }
       const visible = mark && (mark.referenceValue === undefined ? mark : visibleMark(mark, plot, scale));
-      if (visible && ['arrowleft', 'arrowright', 'arrowup', 'arrowdown'].includes(key)) {
+      if (visible && !target?.closest?.('.toolbar-strip') && ['arrowleft', 'arrowright', 'arrowup', 'arrowdown'].includes(key)) {
         event.preventDefault();
         const step = event.shiftKey ? 10 : 1;
         const { points } = translateLine(visible.points, {
@@ -444,7 +445,7 @@ function App() {
                   onClick={() => setPanel(panel === 'data' ? null : 'data')}><Table2 size={17} /> 数据表</button>
               </div>
             </div>
-              {toolbar && toolSettings()}
+              {toolbar && <ToolbarStrip context={`${tool}:${JSON.stringify(selection)}`}>{toolSettings()}</ToolbarStrip>}
             </div>
             <div className={`workspace-body${panel ? ' with-data' : ''}`}>
               <nav className="tool-rail" aria-label="绘图工具">

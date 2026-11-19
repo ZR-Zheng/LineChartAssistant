@@ -73,13 +73,13 @@ export function DataSelectionToolbar({ chart, datum, onEdit, onClose }: Props & 
   }
 
   return (
-    <div className="drawing-toolbar text-toolbar" role="group" aria-label="数据点设置">
+    <div className="drawing-toolbar text-toolbar datum-toolbar" role="group" aria-label="数据点设置">
       <span className="text-toolbar-name">数据点</span>
       <NumberField label="数值" value={value} onChange={next => onEdit(chart => setChartValue(chart, datum.series, datum.index, next))} />
-      <TextField label="类别名称" value={category} onChange={name => onEdit(chart => ({
+      <TextField label="类别" value={category} onChange={name => onEdit(chart => ({
         ...chart, categories: chart.categories.map((item, index) => index === datum.index ? name : item),
       }))} />
-      <TextField label="系列名称" value={series.name} onChange={name => onEdit(chart => ({
+      <TextField label="系列" value={series.name} onChange={name => onEdit(chart => ({
         ...chart, series: chart.series.map((item, index) => index === datum.series ? { ...item, name } : item),
       }))} />
       <div className="color-field"><span>系列颜色</span>
@@ -91,14 +91,14 @@ export function DataSelectionToolbar({ chart, datum, onEdit, onClose }: Props & 
         onClick={() => format({ showLabels: !appearance.showLabels })}><Tags size={15} /> 系列数据标签</button>
       {chart.kind === 'line' ? (
         <>
-          <label>折线宽度
+          <label>线宽
             <select value={appearance.strokeWidth} onChange={event => format({ strokeWidth: Number(event.target.value) })}>
               {numericOptions([1, 2, 3, 4, 5, 6, 8], appearance.strokeWidth).map(width => <option key={width} value={width}>{width}</option>)}
             </select>
           </label>
           <div className="toolbar-marker-controls" role="group" aria-label="点标记样式">
             <button className="button compact toolbar-toggle" aria-pressed={appearance.dots}
-              onClick={() => format({ dots: !appearance.dots })}>显示点标记</button>
+              onClick={() => format({ dots: !appearance.dots })}>点标记</button>
             {appearance.dots && (
               <>
                 <label>标记形状
