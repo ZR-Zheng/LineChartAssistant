@@ -12,7 +12,13 @@ export default defineConfig(({ mode }) => {
       plugins: [react()],
       build: {
         rollupOptions: {
-          output: { manualChunks: { 'pictograph-icons': ['./assets/fluent-pictographs.json'] } },
+          output: { manualChunks: {
+            'pictograph-icons': ['./assets/fluent-pictographs.json'],
+            'pictograph-activities': ['./assets/noto-pictographs-activities.json'],
+            'pictograph-objects': ['./assets/noto-pictographs-everyday.json'],
+            'pictograph-food': ['./assets/noto-pictographs-food.json'],
+            'pictograph-nature': ['./assets/noto-pictographs-nature.json'],
+          } },
         },
       },
       resolve: {

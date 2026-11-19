@@ -122,6 +122,10 @@ export interface PictographStyle {
   symbolGap: number;
   guides: boolean;
   frameColor?: string;
+  tableWidth?: number;
+  tableHeight?: number;
+  categoryColumnShare?: number;
+  categoryRowShare?: number;
   showKey: boolean;
   legendText?: string;
   legendAlignment: 'auto' | 'start' | 'center' | 'end';

@@ -8,7 +8,7 @@ import type { Plot } from '../chart';
 import { NO_TARGETS, snapEndpoint, snapPoint, translateLine } from '../alignment';
 import type { Guides, SnapTargets } from '../alignment';
 import { movePie, pieLayout, pieMoveBounds, resetPieLegend } from '../pieLayout';
-import { pictographLayout, resetPictographLegend } from '../pictograph';
+import { pictographLayout, resetPictographLegend, resizePictographTable, setPictographCategoryShare } from '../pictograph';
 import type { ArrowPlacement, Axis, AxisLabel, ChartDocument, ChartEdit, Datum, EraseScope, LineKind, Mark, NoteTarget, Point,
   Selection, SeriesStyle, Statistic, TextStyle, TextTarget, Tool } from '../types';
 import StyledLine from './StyledLine';
@@ -34,6 +34,8 @@ type Gesture = {
   | { type: 'pie-plot'; datum: Datum | null; position: Point; boundsX: [number, number]; boundsY: [number, number]; moved: boolean }
   | { type: 'axis'; axis: Axis }
   | { type: 'plot'; axis: Axis | 'both'; offset: Point }
+  | { type: 'pictograph-table'; width: number; height: number }
+  | { type: 'pictograph-category'; percent: number; length: number; vertical: boolean }
   | { type: 'newText' }
 );
 
@@ -200,7 +202,7 @@ function ChartDisplay({
     if (tool === 'preview' || !event.isPrimary || event.button !== 0 || gesture.current) return;
     const element = event.target as Element;
     if (element.closest('foreignObject')) return;
-    const target = element.closest<SVGElement>('[data-datum], [data-mark], [data-editable], [data-move-text], [data-note], [data-axis-end], [data-axis-target], [data-stat], [data-pie-legend], [data-pictograph-legend], [data-pie-move]');
+    const target = element.closest<SVGElement>('[data-datum], [data-mark], [data-editable], [data-move-text], [data-note], [data-axis-end], [data-axis-target], [data-stat], [data-pie-legend], [data-pictograph-legend], [data-pictograph-table-resize], [data-pictograph-category-resize], [data-pie-move]');
     if (!target?.hasAttribute('data-pictograph-legend')) lastLegendClick.current = null;
     const movingText = target?.dataset.moveText as MovableText | undefined;
     if (target?.hasAttribute('data-editable') && !movingText) return;
@@ -234,7 +236,13 @@ function ChartDisplay({
       pointer: event.pointerId, start: point, base: document, tolerance,
       targets: NO_TARGETS,
     };
-    if (tool === 'select' && target?.hasAttribute('data-pie-legend')) {
+    if (tool === 'select' && target?.hasAttribute('data-pictograph-table-resize')) {
+      const { table } = pictographLayout(document);
+      gesture.current = { ...base, type: 'pictograph-table', width: table.width, height: table.height };
+    } else if (tool === 'select' && target?.hasAttribute('data-pictograph-category-resize')) {
+      const { table, vertical } = pictographLayout(document);
+      gesture.current = { ...base, type: 'pictograph-category', percent: table.category.percent, length: table.category.length, vertical };
+    } else if (tool === 'select' && target?.hasAttribute('data-pie-legend')) {
       const group = target as SVGGElement;
       const transform = group.transform.baseVal.getItem(0).matrix;
       const position = { x: transform.e, y: transform.f };
@@ -356,6 +364,22 @@ function ChartDisplay({
     if (current.type === 'plot') {
       if (distance < threshold && !draftRef.current) return;
       setPreview(movePlot(current.base, { x: current.offset.x + offset.x, y: current.offset.y + offset.y }));
+      return;
+    }
+
+    if (current.type === 'pictograph-table') {
+      if (distance < threshold && !draftRef.current) return;
+      setPreview(resizePictographTable(current.base, {
+        width: current.width + 2 * offset.x,
+        height: current.height + offset.y,
+      }));
+      return;
+    }
+
+    if (current.type === 'pictograph-category') {
+      const change = current.vertical ? -offset.y : offset.x;
+      if (Math.abs(change) < threshold && !draftRef.current) return;
+      setPreview(setPictographCategoryShare(current.base, current.percent + change / current.length * 100));
       return;
     }
 
@@ -508,6 +532,7 @@ function ChartDisplay({
       else if (current.type === 'pie-plot') onSelect(!current.moved && current.datum ? { kind: 'data', datum: current.datum } : null);
       else if (current.type === 'data') onSelect({ kind: 'data', datum: current.datum });
       else if (current.type === 'axis' || current.type === 'plot') onSelect({ kind: 'axis', axis: current.axis });
+      else if (current.type === 'pictograph-table' || current.type === 'pictograph-category') onSelect(null);
       else if (current.type === 'line') onSelect({ kind: 'mark', index: current.index });
       else if (preview && validLine) onSelect({ kind: 'mark', index: preview.marks.length - 1 });
     }
@@ -604,9 +629,10 @@ function ChartDisplay({
     maxWidth?: number;
     rotation?: number;
     autoSize?: number;
+    cellHeight?: number;
     exercise?: ReturnType<typeof exerciseNoteLayout>;
   } = {}) {
-    const { width = 160, max = 12, maxWidth = Infinity, rotation = 0, autoSize, exercise } = options;
+    const { width = 160, max = 12, maxWidth = Infinity, rotation = 0, autoSize, cellHeight, exercise } = options;
     const textStyle = getTextStyle(chart, target);
     const customStyle = chart.textStyles?.[target];
     const { color, bold, italic, underline } = textStyle;
@@ -625,15 +651,18 @@ function ChartDisplay({
     const horizontalSpace = anchor === 'start' ? WIDTH - 6 - x : anchor === 'end' ? x - 6 : 2 * Math.min(x - 6, WIDTH - 6 - x);
     const available = Math.max(8, Math.min(maxWidth,
       rotation === -90 ? 2 * Math.min(y - 6, HEIGHT - 6 - y) : horizontalSpace));
-    const size = typeof target === 'number' && customStyle?.size === undefined
+    const preferredSize = typeof target === 'number' && customStyle?.size === undefined
       ? Math.min(autoSize ?? textStyle.size, Math.max(5, rotation ? categoryBand * 0.85 : available / 2))
       : textStyle.size;
+    const inCell = cellHeight !== undefined;
+    const size = inCell ? Math.min(preferredSize, available, Math.max(1, cellHeight * 0.85)) : preferredSize;
     const display = shorten(text || fallback, Math.max(1, Math.min(max, Math.floor(available / size))));
     const editorHeight = size + 22;
     return (
       <g key={target}>
         {(text || showPlaceholder) && (
           <text x={x} y={y} textAnchor={anchor} fontSize={size} fill={showPlaceholder ? '#687780' : color}
+            dominantBaseline={inCell ? 'central' : undefined}
             fontFamily={fontFamily} fontWeight={bold ? 700 : 500} fontStyle={fontStyle}
             style={underline ? { textDecoration } : undefined}
             pointerEvents={tool === 'eraser' && !eraseMarks ? 'none' : undefined}
@@ -659,7 +688,9 @@ function ChartDisplay({
           </text>
         )}
         {editing === target && (
-          <foreignObject x={editorX} y={clamp(y - size - 8, 2, (exercise ? sheetHeight : HEIGHT) - editorHeight - 2)} width={width} height={editorHeight} data-editor="">
+          <foreignObject x={editorX}
+            y={clamp(inCell ? y - editorHeight / 2 : y - size - 8, 2, (exercise ? sheetHeight : HEIGHT) - editorHeight - 2)}
+            width={width} height={editorHeight} data-editor="">
             <input ref={editorRef} className="canvas-input" aria-label={fallback} defaultValue={text}
               style={{ fontFamily, fontSize: Math.max(16, size), fontWeight: bold ? 700 : 500, color, fontStyle, textDecoration }}
               autoFocus onFocus={event => event.currentTarget.select()}
@@ -807,7 +838,9 @@ function ChartDisplay({
       {pictograph && <PictographGraphic chart={chart} selection={selection}
         editable={tool === 'select'} eraseData={eraseData} onSelect={onSelect} onEdit={onEdit}
         onEditLegend={onEditPictographLegend} renderDatum={datumNode}
-        renderCategory={(index, x, y, maxWidth, anchor, autoSize) => chartText(index, x, y, '类别', { maxWidth, anchor, autoSize })} />}
+        renderCategory={(index, x, y, maxWidth, anchor, autoSize, cellHeight) => (
+          chartText(index, x, y, '类别', { maxWidth, anchor, autoSize, cellHeight })
+        )} />}
       {hasAxes && scale.ticks.map(value => {
         const y = scale.y(value);
         return (

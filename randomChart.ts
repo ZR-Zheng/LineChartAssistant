@@ -1,5 +1,6 @@
 import { blankChart, EXERCISE_POSITION } from './chart';
-import type { ChartDocument, ChartKind, PictographStyle, TextNote } from './types';
+import type { PictographSymbol } from './pictographSymbols';
+import type { ChartDocument, ChartKind, TextNote } from './types';
 
 interface Exercise {
   topic: Exclude<ExerciseTopic, 'all'>;
@@ -9,7 +10,7 @@ interface Exercise {
   series: string;
   categories: string[];
   step: number;
-  symbols?: PictographStyle['symbol'][];
+  icon?: PictographSymbol | PictographSymbol[];
 }
 
 export const EXERCISE_TOPICS = {
@@ -31,11 +32,6 @@ export function exerciseTypes(kind: ChartKind, grouped = false) {
   if (kind === 'bar' && grouped) return ['chart', 'random', 'reading', 'difference', 'compareGroups', 'compareTotals', 'total', 'average', 'extremes'] as ExerciseType[];
   return (['chart', 'random', 'reading', 'difference', 'total', 'average', 'extremes', ...(kind === 'line' ? ['trend'] : [])]) as ExerciseType[];
 }
-
-const TOPIC_SYMBOLS: Record<Exercise['topic'], PictographStyle['symbol']> = {
-  school: 'book', life: 'person', sports: 'ball', nature: 'flower',
-  traffic: 'car', energy: 'drop', festivals: 'gift', shopping: 'cart',
-};
 
 function exerciseNote(text: string): TextNote {
   return { id: 'note:1', text: `问题：${text}`, position: EXERCISE_POSITION, exerciseQuestion: true };
@@ -157,20 +153,74 @@ const EXERCISES: Record<'line' | 'bar', Exercise[]> = {
   ],
 };
 
-const PICTOGRAPH_EXERCISES: Exercise[] = [
-  {
-    topic: 'nature', title: '小组记录的各类天气天数', xLabel: '天气', yLabel: '天数（天）', series: '天数', step: 1,
-    categories: ['晴天', '阴天', '雨天'], symbols: ['sun', 'cloud', 'rain'],
-  },
-  {
-    topic: 'life', title: '同学们最喜欢的小动物', xLabel: '动物', yLabel: '人数（人）', series: '人数', step: 1,
-    categories: ['猫', '狗', '兔子', '小鸟'], symbols: ['cat', 'dog', 'rabbit', 'bird'],
-  },
-  {
-    topic: 'traffic', title: '同学们的上学方式', xLabel: '方式', yLabel: '人数（人）', series: '人数', step: 1,
-    categories: ['步行', '骑车', '公交', '乘车'], symbols: ['person', 'bike', 'bus', 'car'],
-  },
-  ...EXERCISES.bar,
+type PictographExercise = Exercise & { icon: PictographSymbol | PictographSymbol[] };
+
+function categoryExercise(exercise: Omit<Exercise, 'categories' | 'icon'>, rows: [name: string, icon: PictographSymbol][]): PictographExercise {
+  return { ...exercise, categories: rows.map(([name]) => name), icon: rows.map(([, icon]) => icon) };
+}
+
+const PICTOGRAPH_EXERCISES: PictographExercise[] = [
+  { topic: 'school', title: '图书角各类图书数量', xLabel: '类别', yLabel: '数量（本）', series: '图书数量',
+    categories: ['故事', '科普', '艺术', '历史', '地理'], step: 5, icon: 'book' },
+  { topic: 'school', title: '各班捐赠的图书数量', xLabel: '班级', yLabel: '数量（本）', series: '捐赠数量',
+    categories: ['一班', '二班', '三班', '四班'], step: 5, icon: 'books' },
+  categoryExercise({ topic: 'school', title: '新学期发放的文具数量', xLabel: '文具', yLabel: '数量（件）', series: '发放数量', step: 2 },
+    [['铅笔', 'pencil'], ['尺子', 'ruler'], ['笔记本', 'notebook'], ['剪刀', 'scissors']]),
+
+  categoryExercise({ topic: 'life', title: '同学们最喜欢的小动物', xLabel: '动物', yLabel: '人数（人）', series: '人数', step: 1 },
+    [['猫', 'cat'], ['狗', 'dog'], ['兔子', 'rabbit'], ['小鸟', 'bird'], ['熊猫', 'panda']]),
+  categoryExercise({ topic: 'life', title: '早餐点餐数量', xLabel: '早餐', yLabel: '份数（份）', series: '份数', step: 2 },
+    [['面条', 'noodles'], ['煎蛋', 'friedEgg'], ['面包', 'bread'], ['牛奶', 'milk'], ['饺子', 'dumpling']]),
+  { topic: 'life', title: '各组回收的纸箱数量', xLabel: '组别', yLabel: '数量（个）', series: '纸箱数量',
+    categories: ['第一组', '第二组', '第三组', '第四组'], step: 1, icon: 'package' },
+  { topic: 'life', title: '社区各类可回收物重量', xLabel: '种类', yLabel: '重量（千克）', series: '回收重量',
+    categories: ['纸张', '塑料', '金属', '玻璃'], step: 5, icon: 'recycle' },
+
+  categoryExercise({ topic: 'sports', title: '同学们最喜欢的运动', xLabel: '运动', yLabel: '人数（人）', series: '人数', step: 1 },
+    [['跑步', 'runner'], ['足球', 'soccer'], ['篮球', 'basketball'], ['羽毛球', 'badminton'], ['游泳', 'swim']]),
+  { topic: 'sports', title: '各组选手的投篮命中数', xLabel: '组别', yLabel: '命中数（次）', series: '命中数',
+    categories: ['第一组', '第二组', '第三组', '第四组'], step: 2, icon: 'basketball' },
+  { topic: 'sports', title: '运动会各班获得的奖牌数', xLabel: '班级', yLabel: '数量（枚）', series: '奖牌数量',
+    categories: ['一班', '二班', '三班', '四班'], step: 1, icon: 'medal' },
+
+  categoryExercise({ topic: 'nature', title: '小组记录的各类天气天数', xLabel: '天气', yLabel: '天数（天）', series: '天数', step: 1 },
+    [['晴天', 'sun'], ['阴天', 'cloud'], ['雨天', 'rain'], ['雪天', 'snow']]),
+  { topic: 'nature', title: '校园各处花盆数量', xLabel: '地点', yLabel: '数量（盆）', series: '花盆数量',
+    categories: ['校门', '操场', '花园', '走廊', '教室'], step: 2, icon: 'flowerpot' },
+  categoryExercise({ topic: 'nature', title: '校园花圃中的花卉数量', xLabel: '花卉', yLabel: '数量（株）', series: '花卉数量', step: 2 },
+    [['郁金香', 'tulip'], ['向日葵', 'sunflower'], ['玫瑰', 'rose'], ['木槿花', 'hibiscus']]),
+  { topic: 'nature', title: '校园观察到的鸟类数量', xLabel: '鸟类', yLabel: '数量（只）', series: '数量',
+    categories: ['麻雀', '燕子', '喜鹊', '白头鹎'], step: 2, icon: 'bird' },
+
+  categoryExercise({ topic: 'traffic', title: '同学们的上学方式', xLabel: '方式', yLabel: '人数（人）', series: '人数', step: 1 },
+    [['步行', 'walk'], ['骑自行车', 'bike'], ['坐公交车', 'bus'], ['坐地铁', 'metro'], ['坐私家车', 'car']]),
+  { topic: 'traffic', title: '各站点停放的汽车数量', xLabel: '站点', yLabel: '数量（辆）', series: '停车数量',
+    categories: ['广场站', '公园站', '图书馆站', '体育馆站'], step: 5, icon: 'car' },
+  categoryExercise({ topic: 'traffic', title: '校园门口各类车辆通行数量', xLabel: '车辆', yLabel: '数量（辆）', series: '车辆数量', step: 5 },
+    [['公交车', 'bus'], ['自行车', 'bike'], ['汽车', 'car'], ['货车', 'truck']]),
+
+  { topic: 'energy', title: '各班一周节电量', xLabel: '班级', yLabel: '节电量（千瓦时）', series: '节电量',
+    categories: ['一班', '二班', '三班', '四班', '五班'], step: 2, icon: 'electricPlug' },
+  { topic: 'energy', title: '各组收集的雨水量', xLabel: '组别', yLabel: '水量（升）', series: '收集水量',
+    categories: ['第一组', '第二组', '第三组', '第四组'], step: 5, icon: 'drop' },
+
+  { topic: 'festivals', title: '元宵节各组制作的灯笼数量', xLabel: '组别', yLabel: '数量（个）', series: '灯笼数量',
+    categories: ['第一组', '第二组', '第三组', '第四组'], step: 1, icon: 'lantern' },
+  { topic: 'festivals', title: '中秋节各组制作的月饼数量', xLabel: '组别', yLabel: '数量（个）', series: '月饼数量',
+    categories: ['第一组', '第二组', '第三组', '第四组'], step: 2, icon: 'mooncake' },
+  { topic: 'festivals', title: '元宵游园各项目参与人数', xLabel: '项目', yLabel: '人数（人）', series: '参与人数',
+    categories: ['猜灯谜', '剪纸', '做花灯', '包元宵'], step: 5, icon: 'person' },
+  categoryExercise({ topic: 'festivals', title: '节日布置所用装饰品数量', xLabel: '装饰品', yLabel: '数量（件）', series: '装饰品数量', step: 2 },
+    [['红灯笼', 'lantern'], ['气球', 'balloon'], ['三角旗', 'flag'], ['蝴蝶结', 'ribbon']]),
+
+  categoryExercise({ topic: 'shopping', title: '果蔬店各类水果销量', xLabel: '水果', yLabel: '销量（千克）', series: '水果销量', step: 5 },
+    [['苹果', 'apple'], ['香蕉', 'banana'], ['梨', 'pear'], ['橘子', 'orange'], ['葡萄', 'grapes']]),
+  { topic: 'shopping', title: '一周面包销售量', xLabel: '日期', yLabel: '销量（个）', series: '面包销量',
+    categories: WEEKDAYS, step: 5, icon: 'bread' },
+  { topic: 'shopping', title: '上半年文具店笔记本销量', xLabel: '月份', yLabel: '销量（本）', series: '笔记本销量',
+    categories: MONTHS, step: 20, icon: 'notebook' },
+  { topic: 'shopping', title: '书店各类书籍销售量', xLabel: '书籍类别', yLabel: '销量（本）', series: '书籍销量',
+    categories: ['绘本', '童话', '科普', '漫画', '历史'], step: 10, icon: 'book' },
 ];
 
 function draw<T>(items: T[], count: number, random: () => number) {
@@ -255,12 +305,16 @@ export function randomChart(kind: ChartKind, random = Math.random, topic: Exerci
   const templates = kind === 'pictograph' ? PICTOGRAPH_EXERCISES : EXERCISES[kind === 'line' ? 'line' : 'bar'];
   const choices = topic === 'all' ? templates : templates.filter(exercise => exercise.topic === topic);
   const exercise = choices[Math.floor(random() * choices.length)];
-  const { title, xLabel, yLabel, series, categories, step, symbols } = exercise;
+  const { title, xLabel, yLabel, series, categories, step } = exercise;
+  const icon = kind === 'pictograph' ? exercise.icon : undefined;
+  const symbols = Array.isArray(icon) ? icon : undefined;
   const chart = blankChart(kind);
   const availableTypes = exerciseTypes(kind);
   const chosenType = type === 'random' ? draw(availableTypes.slice(2), 1, random)[0] : type;
   const units = chosenType === 'average' ? averageValues(categories.length, random)
     : draw(Array.from({ length: 9 }, (_, index) => index + 1), categories.length, random);
+  const halfSymbol = kind === 'pictograph' && chosenType === 'symbolValue';
+  if (halfSymbol && units.every(unit => unit % 2 === 0)) units[0] -= 1;
   const values = units.map(value => value * step);
   const notes = chosenType !== 'chart' && chosenType !== 'random' && availableTypes.includes(chosenType)
     ? [exerciseNote(question(chosenType, categories, random, kind))]
@@ -272,9 +326,10 @@ export function randomChart(kind: ChartKind, random = Math.random, topic: Exerci
     style: {
       ...chart.style,
       showLabels: kind === 'pie',
-      ...(kind === 'pictograph' && { pictograph: symbols
-        ? { symbolMode: 'category', colorMode: 'color', direction: 'vertical', unit: chosenType === 'symbolValue' ? 2 : 1 }
-        : { symbol: TOPIC_SYMBOLS[exercise.topic], colorMode: 'color', unit: step * 2 } }),
+      ...(icon && { pictograph: {
+        ...(typeof icon === 'string' ? { symbol: icon } : { symbolMode: 'category', direction: 'vertical' }),
+        colorMode: 'color', unit: step * (halfSymbol ? 2 : 1),
+      } }),
       axes: {
         ...chart.style.axes,
         y: { ...chart.style.axes.y, maximum: step * 10, interval: step, tickMode: 'interval' },

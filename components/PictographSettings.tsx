@@ -2,8 +2,8 @@ import { useEffect } from 'react';
 import type { RefObject } from 'react';
 import { RotateCcw, X } from 'lucide-react';
 import { getSeriesStyle, TEXT_FONTS } from '../chart';
-import { DEFAULT_PICTOGRAPH_LEGEND, DEFAULT_PICTOGRAPH_SHAPE, PICTOGRAPH_LEGEND_LIMIT, PICTOGRAPH_PRESETS, pictographLayout,
-  resetPictographLegend, savePictographLegendText, updatePictographStyle } from '../pictograph';
+import { DEFAULT_PICTOGRAPH_LEGEND, DEFAULT_PICTOGRAPH_SHAPE, PICTOGRAPH_LEGEND_LIMIT, PICTOGRAPH_PRESETS, PICTOGRAPH_TABLE_LIMITS, pictographLayout,
+  resetPictographLegend, resizePictographTable, savePictographLegendText, setPictographCategoryShare, updatePictographStyle } from '../pictograph';
 import type { ChartDocument, ChartEdit, PictographStyle } from '../types';
 import ColorPicker from './ColorPicker';
 import PictographSymbolField from './PictographSymbolField';
@@ -14,7 +14,9 @@ export default function PictographSettings({ chart, onEdit, onClose, onToggleLab
   chart: ChartDocument; onEdit: ChartEdit; onClose: () => void; onToggleLabels: () => void; onToggleLegend: () => void;
   tab: PictographSettingsTab; onSelectTab: (tab: PictographSettingsTab) => void; legendInput: RefObject<HTMLTextAreaElement | null>;
 }) {
-  const { style, unit, unitLabel, series, seriesIndex, legend } = pictographLayout(chart);
+  const { style, unit, unitLabel, series, seriesIndex, legend, table, vertical } = pictographLayout(chart);
+  const categoryPercent = Math.round(table.category.percent * 10) / 10;
+  const categoryField = vertical ? 'categoryRowShare' : 'categoryColumnShare';
   const presets = Object.entries(PICTOGRAPH_PRESETS);
   const currentPreset = presets.find(([, preset]) => Object.entries(preset.style).every(([key, value]) => style[key] === value))?.[0] ?? '';
 
@@ -120,6 +122,46 @@ export default function PictographSettings({ chart, onEdit, onClose, onToggleLab
             {style.colorMode === 'single' && <button className="button compact" aria-pressed={style.outline}
               onClick={() => update({ outline: !style.outline })}>空心几何图符</button>}
           </div>
+          {style.frame && <>
+            <div className="axis-row" role="group" aria-label="表格尺寸">
+              {(['width', 'height'] as const).map(dimension => {
+                const { min, max } = PICTOGRAPH_TABLE_LIMITS[dimension];
+                const limit = dimension === 'height' ? table.maxHeight : max;
+                const value = table[dimension];
+                return (
+                  <label key={dimension}>表格{dimension === 'width' ? '宽度' : '高度'}
+                    <input key={value} type="number" min={min} max={limit} step={1} defaultValue={value} disabled={limit < min}
+                      onBlur={event => {
+                        const input = event.currentTarget;
+                        const size = input.valueAsNumber;
+                        input.value = String(value);
+                        if (Number.isFinite(size) && size !== value) onEdit(current => resizePictographTable(current, { [dimension]: size }));
+                      }} onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); }} />
+                  </label>
+                );
+              })}
+            </div>
+            <label>{vertical ? '类别行占比（%）' : '类别列占比（%）'}
+              <input key={`${categoryField}:${categoryPercent}`} type="number" min={table.category.min} max={table.category.max}
+                step={0.1} defaultValue={categoryPercent} disabled={table.category.min >= table.category.max}
+                onBlur={event => {
+                  const input = event.currentTarget;
+                  const share = input.valueAsNumber;
+                  input.value = String(categoryPercent);
+                  if (Number.isFinite(share) && share !== categoryPercent) onEdit(current => setPictographCategoryShare(current, share));
+                }} onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); }} />
+            </label>
+            {style[categoryField] !== undefined && (
+              <div className="panel-actions">
+                <button className="button compact" onClick={() => update({ [categoryField]: undefined })}>还原类别占比</button>
+              </div>
+            )}
+            {(style.tableWidth !== undefined || style.tableHeight !== undefined) && (
+              <div className="panel-actions">
+                <button className="button compact" onClick={() => update({ tableWidth: undefined, tableHeight: undefined })}>还原表格尺寸</button>
+              </div>
+            )}
+          </>}
           {(style.guides || style.frame) && <div className="panel-actions" role="group" aria-label="线条颜色">
             <div className="color-field"><span>边框与辅助线</span>
               <ColorPicker label="边框与辅助线颜色" value={style.frameColor ?? '#bfc9d9'} onChange={frameColor => update({ frameColor })} />

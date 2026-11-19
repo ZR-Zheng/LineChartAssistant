@@ -19,7 +19,7 @@ export default function PictographSymbolField({ label, value, color, outline, mo
   const [query, setQuery] = useState('');
   const colored = mode === 'color';
   const search = query.trim().toLowerCase();
-  const choices = symbols.filter(([key, [name, , category]]) => search ? name.includes(search) || key.includes(search) : category === group);
+  const choices = symbols.filter(([key, [name, , category]]) => search ? name.includes(search) || key.toLowerCase().includes(search) : category === group);
 
   useLayoutEffect(() => {
     if (!open) return;

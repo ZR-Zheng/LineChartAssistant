@@ -6,12 +6,16 @@ import {
   ShoppingCart, Snail, Snowflake, Square, Star, Sun, Tractor, TrainFront, TreeDeciduous, TreePine, Triangle, Trophy, Truck,
   Turtle, Umbrella, UserRound, Volleyball, Wheat,
 } from 'lucide-react';
+import { NOTO_PICTOGRAPH_SYMBOLS } from './notoPictographSymbols';
 
 export const SYMBOL_GROUPS = {
   shapes: '基本图形', school: '校园与生活', sports: '运动', food: '食物', animals: '动物', nature: '自然与天气', transport: '交通',
+  festivals: '节日与活动',
 } as const;
 
-export const PICTOGRAPH_SYMBOLS = {
+type IconEntry = readonly [string, typeof Circle | null, keyof typeof SYMBOL_GROUPS];
+
+const FLUENT_PICTOGRAPH_SYMBOLS = {
   circle: ['圆形', Circle, 'shapes'],
   square: ['方形', Square, 'shapes'],
   triangle: ['三角形', Triangle, 'shapes'],
@@ -91,7 +95,13 @@ export const PICTOGRAPH_SYMBOLS = {
   ambulance: ['救护车', Ambulance, 'transport'],
   rocket: ['火箭', Rocket, 'transport'],
   tractor: ['拖拉机', Tractor, 'transport'],
-} as const satisfies Record<string, readonly [string, typeof Circle, keyof typeof SYMBOL_GROUPS]>;
+} as const satisfies Record<string, IconEntry>;
+
+const notoSymbols = Object.fromEntries<IconEntry>(Object.entries(NOTO_PICTOGRAPH_SYMBOLS).map(([id, [label, group]]) => (
+  [id, [label, null, group]]
+))) as Record<keyof typeof NOTO_PICTOGRAPH_SYMBOLS, IconEntry>;
+
+export const PICTOGRAPH_SYMBOLS = { ...FLUENT_PICTOGRAPH_SYMBOLS, ...notoSymbols };
 
 export type PictographSymbol = keyof typeof PICTOGRAPH_SYMBOLS;
 

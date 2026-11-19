@@ -279,6 +279,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .line-handle:active { cursor: grabbing; }
 .handle-x { cursor: ew-resize; }
 .handle-y { cursor: ns-resize; }
+.pictograph-table-handle { cursor: nwse-resize; }
+.pictograph-category-handle { cursor: ew-resize; }
+.pictograph-category-handle[aria-orientation="vertical"] { cursor: ns-resize; }
+.pictograph-category-handle:hover line { stroke: #6983ef33; }
 .plot-handle { cursor: move; }
 .axis-targets line { stroke: transparent; stroke-width: 12; cursor: move; }
 .axis-targets line:hover { stroke: #6983ef33; }
