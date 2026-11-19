@@ -9,13 +9,15 @@ interface Props {
   onChange: (changes: Partial<TextStyle>) => void;
   onClose?: () => void;
   onDelete?: () => void;
+  onDeleteCategory?: () => void;
   titlePlacement?: { axis: Axis; value: TitlePlacement; onChange: (value: TitlePlacement) => void };
 }
 
-function TextToolbar({ target, style, onChange, onClose, onDelete, titlePlacement }: Props) {
+function TextToolbar({ target, style, onChange, onClose, onDelete, onDeleteCategory, titlePlacement }: Props) {
   const name = typeof target === 'number' ? '类别标签' : isNote(target) ? '文字标注' : {
     title: '图表标题', xLabel: '横轴标题', yLabel: '纵轴标题',
   }[target];
+  const removeLabel = isNote(target) ? '删除文字标注' : `隐藏${name}`;
   return (
     <div className="drawing-toolbar text-toolbar" role="group" aria-label="文字格式">
       <span className="text-toolbar-name">{name}</span>
@@ -63,7 +65,8 @@ function TextToolbar({ target, style, onChange, onClose, onDelete, titlePlacemen
           </select>
         </label>
       )}
-      {onDelete && <button className="icon-button" aria-label="删除文字标注" title="删除文字标注" onClick={onDelete}><Trash2 size={16} /></button>}
+      {onDelete && <button className="icon-button" aria-label={removeLabel} title={removeLabel} onClick={onDelete}><Trash2 size={16} /></button>}
+      {onDeleteCategory && <button className="button compact" onClick={onDeleteCategory}>删除整个类别</button>}
       {onClose && <button className="icon-button text-toolbar-close" aria-label="关闭文字格式" title="关闭文字格式"
         onClick={onClose}><X size={17} /></button>}
     </div>

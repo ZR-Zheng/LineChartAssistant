@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent, PointerEvent, ReactNode, RefObject } from 'react';
-import { AXIS_LENGTHS, axisTitleLayout, categoryX, clamp, constrainPlotOffset, FONT, formatValue, getPlot, getScale, getSeriesStyle, getTextStyle, HEIGHT,
-  isNote, markPath, movePlot, removeNote, setChartValue, STATISTIC_LABELS, TEXT_FONTS, textValue, visibleMark, WIDTH } from '../chart';
+import { AXIS_LENGTHS, axisTitleLayout, categoryX, clamp, constrainPlotOffset, DEFAULT_AXIS_ARROWHEAD, FONT, formatValue, getPlot, getScale, getSeriesStyle, getTextStyle, HEIGHT,
+  hideText, isNote, markPath, movePlot, removeNote, setChartValue, STATISTIC_LABELS, TEXT_FONTS, textValue, verticalAxisExtension, visibleMark, WIDTH } from '../chart';
 import type { Plot } from '../chart';
 import { NO_TARGETS, snapEndpoint, snapPoint, translateLine } from '../alignment';
 import type { Guides, SnapTargets } from '../alignment';
@@ -66,35 +66,35 @@ function isLightColor(color: string) {
   return red * 0.299 + green * 0.587 + blue * 0.114 > 155;
 }
 
-function SeriesDot({ x, y, size, color, width, shape }: {
-  x: number; y: number; size: number; color: string; width: number; shape: SeriesStyle['dotShape'];
+function SeriesDot({ x, y, size, color, width, shape, fill }: {
+  x: number; y: number; size: number; color: string; width: number; shape: SeriesStyle['dotShape']; fill: SeriesStyle['dotFill'];
 }) {
-  const paint = { fill: '#fff', stroke: color, strokeWidth: width, strokeLinejoin: 'round' as const };
+  const paint = { fill: fill === 'solid' ? color : '#fff', stroke: color, strokeWidth: width, strokeLinejoin: 'round' as const };
   if (shape === 'square') return <rect x={x - size} y={y - size} width={2 * size} height={2 * size} {...paint} />;
   if (shape === 'diamond') return <path d={`M ${x} ${y - size} l ${size} ${size} -${size} ${size} -${size} -${size} Z`} {...paint} />;
   return <circle cx={x} cy={y} r={size} {...paint} />;
 }
 
 function linePath(values: (number | null)[], scale: Scale, plot: Plot) {
-  let previous: number | null = null;
-  return values.map((value, index) => {
-    const before = previous;
-    previous = value;
+  return scale.bands.map(({ min, max }) => values.map((value, index) => {
     if (value === null) return '';
-    const outside = value > scale.limit;
+    const before = values[index - 1] ?? null;
+    const inside = value >= min && value <= max;
     const x = categoryX(index, values.length, plot);
-    if (before === null) return outside ? '' : `M${x},${scale.y(value)}`;
-    const wasOutside = before > scale.limit;
-    if (!wasOutside && !outside) return `L${x},${scale.y(value)}`;
-    if (wasOutside && outside) return '';
+    if (before === null) return inside ? `M${x},${scale.y(value)}` : '';
+    if (Math.max(before, value) < min || Math.min(before, value) > max) return '';
+    if (inside && before >= min && before <= max) return `L${x},${scale.y(value)}`;
 
-    const difference = value - before;
-    const fraction = Number.isFinite(difference) ? (scale.limit - before) / difference
-      : (scale.limit / 2 - before / 2) / (value / 2 - before / 2);
     const previousX = categoryX(index - 1, values.length, plot);
-    const edge = `${previousX + (x - previousX) * fraction},${plot.top}`;
-    return outside ? `L${edge}` : `M${edge} L${x},${scale.y(value)}`;
-  }).join(' ');
+    const difference = value - before;
+    const crossing = (edge: number) => {
+      const fraction = Number.isFinite(difference) ? (edge - before) / difference
+        : (edge / 2 - before / 2) / (value / 2 - before / 2);
+      return `${previousX + (x - previousX) * fraction},${scale.y(edge)}`;
+    };
+    const start = before < min || before > max ? `M${crossing(clamp(before, min, max))} ` : '';
+    return `${start}L${inside ? `${x},${scale.y(value)}` : crossing(clamp(value, min, max))}`;
+  }).join(' ')).join(' ');
 }
 
 function textBounds(element: SVGGraphicsElement, canvasMatrix: DOMMatrix) {
@@ -125,7 +125,7 @@ function alignmentTargets(document: ChartDocument, plot: Plot, scale: Scale, ski
   });
   for (const label of ['xLabel', 'yLabel'] as const) {
     const axis = label === 'xLabel' ? 'x' : 'y';
-    if (!document.style.axes[axis].showLabel) continue;
+    if (document.style.axes[axis].visible === false || !document.style.axes[axis].showLabel) continue;
     const anchor = axisTitleLayout(axis, plot, document, scale.y(0)).point;
     const position = label === skipLabel ? anchor : document.labelPositions[label] ?? anchor;
     x.push(position.x);
@@ -446,12 +446,14 @@ function ChartDisplay({
   function editText(target: TextTarget, value: string) {
     setEditing(null);
     const text = value.trim();
+    if (!text) {
+      onEdit(current => hideText(current, target));
+      onSelect(null);
+      return;
+    }
     onEdit(current => {
       if (isNote(target)) {
         if (text === textValue(current, target)) return current;
-        if (!text) {
-          return removeNote(current, target);
-        }
         return { ...current, notes: current.notes.map(note => note.id === target ? { ...note, text } : note) };
       }
       if (typeof target !== 'number') return current[target] === text ? current : { ...current, [target]: text };
@@ -472,6 +474,10 @@ function ChartDisplay({
   const zero = scale.y(0);
   const { style } = chart;
   const { x: xAxis, y: yAxis } = style.axes;
+  const axisArrowhead = style.axisArrowhead ?? DEFAULT_AXIS_ARROWHEAD;
+  const { omission } = scale;
+  const showX = xAxis.visible !== false;
+  const showY = yAxis.visible !== false;
   const xTickEvery = xAxis.tickMode === 'all' ? 1 : xAxis.tickMode === 'interval' ? xAxis.interval : labelEvery;
   const categoryBand = spacing * Math.min(xTickEvery, count);
   const angledCategories = categoryBand < 44 && chart.categories.some((category, index) => (
@@ -479,7 +485,7 @@ function ChartDisplay({
   ));
   const yTickSize = clamp(scale.tickSpacing * 0.85, 4, 13);
   const xEnd = { x: plot.right + 10, y: zero };
-  const yEnd = { x: plot.left, y: plot.top - 8 };
+  const yEnd = { x: plot.left, y: plot.top - verticalAxisExtension(yAxis) };
   const xTitle = axisTitleLayout('x', plot, chart, zero);
   const yTitle = axisTitleLayout('y', plot, chart);
   const xLabel = chart.labelPositions.xLabel ?? xTitle.point;
@@ -496,6 +502,7 @@ function ChartDisplay({
     const next = event.key === 'ArrowUp' ? scale.nudge(value, 1)
       : event.key === 'ArrowDown' ? scale.nudge(value, -1) : null;
     onEdit(current => setChartValue(current, series, index, next));
+    if (next === null) onSelect(null);
   }
 
   function chartText(target: TextTarget, x: number, y: number, fallback: string, options: {
@@ -563,6 +570,12 @@ function ChartDisplay({
               onBlur={event => editText(target, event.currentTarget.value)}
               onKeyDown={event => {
                 if (event.nativeEvent.isComposing) return;
+                const input = event.currentTarget;
+                if (event.key === 'Delete' && input.selectionStart === 0 && input.selectionEnd === input.value.length) {
+                  event.preventDefault();
+                  input.value = '';
+                  input.blur();
+                }
                 if (event.key === 'Enter') event.currentTarget.blur();
                 if (event.key === 'Escape') {
                   event.currentTarget.value = text;
@@ -587,12 +600,17 @@ function ChartDisplay({
           strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />
       )}
       {series.values.map((value, index) => {
-        if (value === null) return null;
+        if (value === null || scale.inBreak(value)) return null;
         const clipped = value > scale.limit;
         if (clipped && (chart.kind === 'line' || scale.limit === 0)) return null;
         const center = categoryX(index, count, plot);
         const x = chart.kind === 'bar' ? center - groupWidth / 2 + (seriesIndex + 0.5) * barWidth : center;
         const y = scale.y(Math.min(value, scale.limit));
+        const columnBands = chart.kind === 'bar' ? scale.bands.flatMap(({ min, max }) => {
+          const start = Math.max(min, Math.min(0, value));
+          const end = Math.min(max, Math.max(0, value));
+          return start < end || value === 0 && start === end ? [{ top: scale.y(end), bottom: scale.y(start) }] : [];
+        }) : [];
         const negativeBar = value < 0 && chart.kind === 'bar';
         const labelInside = negativeBar && y + 20 >= plot.bottom && y - zero >= 24 && barWidth >= 30;
         const labelGap = chart.kind === 'line' ? Math.max(13, seriesStyle.dotSize + 7) : 13;
@@ -609,17 +627,19 @@ function ChartDisplay({
             onKeyDown={editable ? event => handleDatumKey(event, seriesIndex, index, value) : undefined}>
             {chart.kind === 'bar' ? (
               <>
-                <rect x={x - columnWidth / 2} y={Math.min(y, zero) - (value === 0 ? 1.5 : 0)} width={columnWidth}
-                  height={Math.max(1.5, Math.abs(y - zero))}
-                  rx={seriesStyle.roundedColumns ? Math.min(4, barWidth * 0.1) : undefined} fill={series.color} />
-                {activeDatum && <rect x={x - barWidth / 2} y={Math.min(y, zero) - 6} width={barWidth}
-                  height={Math.abs(y - zero) + 12} fill="transparent" data-editor-only="" />}
+                {columnBands.map(({ top, bottom }) => <g key={top}>
+                  <rect x={x - columnWidth / 2} y={top - (value === 0 ? 1.5 : 0)} width={columnWidth}
+                    height={Math.max(1.5, bottom - top)}
+                    rx={seriesStyle.roundedColumns ? Math.min(4, barWidth * 0.1) : undefined} fill={series.color} />
+                  {activeDatum && <rect x={x - barWidth / 2} y={top - 6} width={barWidth}
+                    height={bottom - top + 12} fill="transparent" data-editor-only="" />}
+                </g>)}
               </>
             ) : (
               <>
                 {(series.style?.dots ?? (seriesStyle.dots || series.values[index - 1] == null && series.values[index + 1] == null)) && (
                   <SeriesDot x={x} y={y} size={seriesStyle.dotSize} width={seriesStyle.strokeWidth}
-                    shape={seriesStyle.dotShape} color={series.color} />
+                    shape={seriesStyle.dotShape} fill={seriesStyle.dotFill} color={series.color} />
                 )}
                 {activeDatum && <circle cx={x} cy={y} r={Math.max(12, seriesStyle.dotSize + 4)} fill="transparent" data-editor-only="" />}
               </>
@@ -667,44 +687,53 @@ function ChartDisplay({
       onPointerDown={startGesture} onPointerMove={event => moveGesture(event)}
       onPointerUp={finishGesture} onPointerCancel={cancelGesture} onLostPointerCapture={cancelGesture}>
       <rect width={WIDTH} height={HEIGHT} fill="#fff" data-paper="" />
-      {chartText('title', (plot.left + plot.right) / 2, 63, '图表标题', { width: 440, max: 27 })}
+      {style.showTitle !== false && chartText('title', (plot.left + plot.right) / 2, 63, '图表标题', { width: 440, max: 27 })}
       {scale.ticks.map(value => {
         const y = scale.y(value);
         return (
           <g key={value} pointerEvents="none">
             {style.grid && <line x1={plot.left} y1={y} x2={plot.right} y2={y} stroke="#e2e7f1" />}
-            {yAxis.tickLength > 0 && <line x1={plot.left - yTickFrom} x2={plot.left - yTickTo} y1={y} y2={y}
+            {showY && yAxis.tickLength > 0 && <line x1={plot.left - yTickFrom} x2={plot.left - yTickTo} y1={y} y2={y}
               stroke={yAxis.color} data-axis-tick="y" data-tick-value={value} />}
-            {yAxis.showValues && <text x={plot.left - yTickTo - 8} y={y + yTickSize / 3} textAnchor="end"
+            {showY && yAxis.showValues && <text x={plot.left - yTickTo - 8} y={y + yTickSize / 3} textAnchor="end"
               fontSize={yTickSize} data-custom-size={yAxis.tickMode !== 'auto' ? '' : undefined} fill="#4e5b73">{formatValue(value)}</text>}
           </g>
         );
       })}
       {chart.kind === 'bar' && dataGraphics}
       <g pointerEvents="none">
-        <g data-axis="x"><StyledLine start={{ x: plot.left, y: zero }} end={xEnd}
-          kind={xAxis.line} color={xAxis.color} width={xAxis.width} /></g>
-        <g data-axis="y"><StyledLine start={{ x: plot.left, y: plot.bottom }} end={yEnd}
-          kind={yAxis.line} color={yAxis.color} width={yAxis.width} /></g>
+        {showX && <g data-axis="x"><StyledLine start={{ x: plot.left, y: zero }} end={xEnd}
+          kind={xAxis.line} color={xAxis.color} width={xAxis.width} arrowhead={axisArrowhead} /></g>}
+        {showY && <g data-axis="y">
+          <StyledLine start={{ x: plot.left, y: omission?.top ?? plot.bottom }} end={yEnd}
+            kind={yAxis.line} color={yAxis.color} width={yAxis.width} arrowhead={axisArrowhead} />
+          {omission && <g data-axis-break="y">
+            <title>{`纵轴省略 ${formatValue(omission.from)} 至 ${formatValue(omission.to)}`}</title>
+            {omission.bottom < plot.bottom && <StyledLine start={{ x: plot.left, y: plot.bottom }} end={{ x: plot.left, y: omission.bottom }}
+              kind={yAxis.line === 'dashed' ? 'dashed' : 'solid'} color={yAxis.color} width={yAxis.width} />}
+            {[omission.top, omission.bottom].map(y => <line key={y} x1={plot.left - 5} x2={plot.left + 5}
+              y1={y + 3} y2={y - 3} stroke={yAxis.color} strokeWidth={yAxis.width} strokeLinecap="round" />)}
+          </g>}
+        </g>}
       </g>
       {tool === 'select' && (
         <g data-editor-only="" className="axis-targets">
-          <line x1={plot.left} y1={zero} x2={xEnd.x} y2={zero} data-axis-target="x" />
-          <line x1={plot.left} y1={plot.bottom} x2={plot.left} y2={yEnd.y} data-axis-target="y" />
+          {showX && <line x1={plot.left} y1={zero} x2={xEnd.x} y2={zero} data-axis-target="x" />}
+          {showY && <line x1={plot.left} y1={plot.bottom} x2={plot.left} y2={yEnd.y} data-axis-target="y" />}
         </g>
       )}
       {style.showOrigin && (
         <text data-origin="" x={plot.left - yTickTo - 8} y={zero + yTickSize / 3} textAnchor="end"
           fontSize={yTickSize} data-custom-size={yAxis.tickMode !== 'auto' ? '' : undefined} fill="#4e5b73">0</text>
       )}
-      {chart.categories.map((_, index) => {
+      {showX && chart.categories.map((_, index) => {
         if (index % xTickEvery !== 0) return null;
         const x = categoryX(index, count, plot);
         return (
           <g key={index}>
             {xAxis.tickLength > 0 && <line x1={x} y1={zero + xTickFrom} x2={x} y2={zero + xTickTo}
               stroke={xAxis.color} data-axis-tick="x" />}
-            {xAxis.showValues &&
+            {xAxis.showValues && !chart.hiddenCategoryLabels?.includes(index) &&
               chartText(index, x, plot.bottom + (angledCategories ? Math.max(18, xTickTo + 12) : Math.max(28, xTickTo + 18)), '类别', {
                 width: 100, maxWidth: angledCategories ? 44 : Math.max(8, categoryBand - 4),
                 anchor: angledCategories ? 'end' : 'middle', rotation: angledCategories ? -60 : 0,
@@ -729,8 +758,8 @@ function ChartDisplay({
           })}
         </g>
       )}
-      {xAxis.showLabel && chartText('xLabel', xLabel.x, xLabel.y, '横轴标题', { anchor: xTitle.anchor, max: 25 })}
-      {yAxis.showLabel && chartText('yLabel', yLabel.x, yLabel.y, '纵轴标题', { anchor: yTitle.anchor, rotation: yTitle.rotation, max: 25 })}
+      {showX && xAxis.showLabel && chartText('xLabel', xLabel.x, xLabel.y, '横轴标题', { anchor: xTitle.anchor, max: 25 })}
+      {showY && yAxis.showLabel && chartText('yLabel', yLabel.x, yLabel.y, '纵轴标题', { anchor: yTitle.anchor, rotation: yTitle.rotation, max: 25 })}
       {statisticGuides.size > 0 && (
         <g data-editor-only="" className="statistic-guides">
           {[...statisticGuides].map(([value, keys]) => {
@@ -775,10 +804,10 @@ function ChartDisplay({
       })}
       {chart.notes.map(note => chartText(note.id, note.position.x, note.position.y, '文字标注', { anchor: 'start', width: 280, max: 90 }))}
       <g data-editor-only="">
-        {tool === 'select' && <circle cx={plot.left} cy={zero} r={6} className="axis-handle plot-handle" data-axis-target="both">
+        {tool === 'select' && (showX || showY) && <circle cx={plot.left} cy={zero} r={6} className="axis-handle plot-handle" data-axis-target="both">
           <title>拖动原点移动坐标系</title>
         </circle>}
-        {tool === 'select' && ([['x', xEnd], ['y', yEnd]] as const).map(([axis, end]) => (
+        {tool === 'select' && ([['x', xEnd, showX], ['y', yEnd, showY]] as const).filter(([, , shown]) => shown).map(([axis, end]) => (
           <circle key={axis} cx={end.x} cy={end.y} r={6} className={`axis-handle handle-${axis}`}
             data-axis-end={axis}><title>拖动调整{axis === 'x' ? '横轴' : '纵轴'}长度</title></circle>
         ))}

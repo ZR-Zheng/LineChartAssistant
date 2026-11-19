@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { RotateCcw, X } from 'lucide-react';
-import { AXIS_LENGTHS, AXIS_TITLE_PLACEMENTS, DEFAULT_STYLE, parseValue } from '../chart';
+import { AXIS_LENGTHS, AXIS_TITLE_PLACEMENTS, DEFAULT_STYLE, isAxisBreak, parseValue } from '../chart';
 import type { Axis, AxisStyle, ChartDocument, ChartEdit } from '../types';
+import AxisArrowheadField from './AxisArrowheadField';
 import ColorPicker from './ColorPicker';
 
 interface Props {
@@ -28,7 +29,7 @@ function AxisPanel({ chart, onEdit, onClose, axis, onSelectAxis }: Props) {
       if (key === 'titlePlacement') delete labelPositions[label];
       return {
         ...current, style: { ...current.style, axes }, labelPositions,
-        scaleExtent: key === 'maximum' ? null : current.scaleExtent,
+        scaleExtent: key === 'maximum' || key === 'omitted' ? null : current.scaleExtent,
       };
     });
   }
@@ -38,6 +39,11 @@ function AxisPanel({ chart, onEdit, onClose, axis, onSelectAxis }: Props) {
       const value = parseValue(input.value);
       if (key === 'maximum') {
         if (value !== null && value < 0) throw new Error();
+        if (value !== null && style.omitted && value < style.omitted.to) {
+          input.value = String(style.maximum ?? '');
+          setError('最大值须达到断轴终点，或先移除断轴。');
+          return;
+        }
         update('maximum', value ?? undefined);
       } else {
         if (value === null || value <= 0 || axis === 'x' && !Number.isSafeInteger(value)) throw new Error();
@@ -92,6 +98,7 @@ function AxisPanel({ chart, onEdit, onClose, axis, onSelectAxis }: Props) {
           </label>
         </div>
         <div className="axis-settings" key={axis}>
+          <AxisArrowheadField style={chart.style} onEdit={onEdit} />
           <div className="axis-row">
             <label>轴线样式
               <select value={style.line} onChange={event => update('line', event.target.value as AxisStyle['line'])}>
@@ -119,6 +126,8 @@ function AxisPanel({ chart, onEdit, onClose, axis, onSelectAxis }: Props) {
               </label>
             )}
           </div>
+          {axis === 'y' && <AxisBreakFields style={style}
+            onApply={range => update('omitted', range)} />}
           <div className="axis-row">
             <label>刻度线位置
               <select value={style.tickPosition} onChange={event => update('tickPosition', event.target.value as AxisStyle['tickPosition'])}>
@@ -161,6 +170,8 @@ function AxisPanel({ chart, onEdit, onClose, axis, onSelectAxis }: Props) {
           )}
           {error && <p className="panel-error" role="alert">{error}</p>}
           <div className="axis-checks">
+            <label><input type="checkbox" checked={style.visible !== false} onChange={event => update('visible', event.target.checked)} />
+              显示{axisName}</label>
             <label><input type="checkbox" checked={style.showValues} onChange={event => update('showValues', event.target.checked)} />
               {axis === 'x' ? '显示类别标签' : '显示刻度标签'}</label>
             <label><input type="checkbox" checked={style.showLabel} onChange={event => update('showLabel', event.target.checked)} /> 显示轴标题</label>
@@ -183,6 +194,40 @@ function AxisPanel({ chart, onEdit, onClose, axis, onSelectAxis }: Props) {
         </div>
       </div>
     </aside>
+  );
+}
+
+function AxisBreakFields({ style, onApply }: { style: AxisStyle; onApply: (range: AxisStyle['omitted']) => void }) {
+  const [open, setOpen] = useState(Boolean(style.omitted));
+  const [error, setError] = useState('');
+  return (
+    <details className="axis-break-settings" open={open} onToggle={event => setOpen(event.currentTarget.open)}>
+      <summary>纵轴断轴{style.omitted ? '（已启用）' : ''}</summary>
+      <form onSubmit={event => {
+        event.preventDefault();
+        const form = new FormData(event.currentTarget);
+        try {
+          const range = { from: parseValue(String(form.get('from'))), to: parseValue(String(form.get('to'))) };
+          if (!isAxisBreak(range)) throw new Error('请填写递增的断轴起点和终点，省略区间不能跨过原点 0。');
+          if (style.maximum !== undefined && range.to > style.maximum) throw new Error('断轴终点须小于或等于纵轴最大值。');
+          setError('');
+          onApply(range);
+        } catch (caught) { setError(caught.message); }
+      }}>
+        <div className="axis-row">
+          <label>省略起点<input key={style.omitted?.from ?? 'empty'} type="text" name="from" inputMode="decimal"
+            defaultValue={style.omitted?.from} placeholder="例如 2" autoComplete="off" /></label>
+          <label>省略终点<input key={style.omitted?.to ?? 'empty'} type="text" name="to" inputMode="decimal"
+            defaultValue={style.omitted?.to} placeholder="例如 10" autoComplete="off" /></label>
+        </div>
+        <small>起点和终点保留显示，区间内部以断轴符号省略。</small>
+        {error && <p role="alert" className="panel-error">{error}</p>}
+        <div className="panel-actions">
+          <button className="button compact">应用断轴</button>
+          {style.omitted && <button type="button" className="text-button" onClick={() => onApply(undefined)}>移除断轴</button>}
+        </div>
+      </form>
+    </details>
   );
 }
 

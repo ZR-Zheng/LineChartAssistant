@@ -2,6 +2,7 @@ export type ChartKind = 'line' | 'bar';
 export type Tool = 'line' | 'pen' | 'eraser' | 'select' | 'text';
 export type LineKind = 'solid' | 'dashed' | 'arrow';
 export type ArrowPlacement = 'start' | 'end' | 'both';
+export type AxisArrowhead = 'open' | 'outline' | 'filled';
 export type EraseScope = 'all' | 'marks' | 'data';
 export type Axis = 'x' | 'y';
 export type AxisLabel = 'xLabel' | 'yLabel';
@@ -17,6 +18,7 @@ export type Selection =
   | { kind: 'axis'; axis: Axis | 'both' };
 export type TextFont = 'system' | 'sans' | 'serif' | 'kai' | 'mono';
 export type TickMode = 'auto' | 'all' | 'interval';
+export type AxisBreak = { from: number; to: number };
 
 export interface TextStyle {
   font: TextFont;
@@ -54,6 +56,7 @@ export interface SeriesStyle {
   strokeWidth: number;
   dotSize: number;
   dotShape: 'circle' | 'square' | 'diamond';
+  dotFill: 'hollow' | 'solid';
   dots: boolean;
   showLabels: boolean;
   columnWidth: number;
@@ -77,6 +80,8 @@ export interface AxisStyle {
   tickMode: TickMode;
   interval: number;
   maximum?: number;
+  omitted?: AxisBreak;
+  visible?: boolean;
   showValues: boolean;
   showLabel: boolean;
   titlePlacement: TitlePlacement;
@@ -87,9 +92,11 @@ export interface ChartStyle {
   showLabels: boolean;
   dots: boolean;
   showOrigin: boolean;
+  showTitle?: boolean;
   dotSize: number;
   strokeWidth: number;
   axes: Record<Axis, AxisStyle>;
+  axisArrowhead?: AxisArrowhead;
   legend: boolean | 'auto';
 }
 
@@ -99,6 +106,7 @@ export interface ChartDocument {
   xLabel: string;
   yLabel: string;
   categories: string[];
+  hiddenCategoryLabels?: number[];
   series: Series[];
   marks: Mark[];
   notes: TextNote[];

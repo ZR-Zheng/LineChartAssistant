@@ -1,6 +1,8 @@
 import { RotateCcw, SlidersHorizontal, Tags, Trash2, X } from 'lucide-react';
-import { AXIS_LENGTHS, clamp, getSeriesStyle, movePlot, parseValue, setChartValue } from '../chart';
+import { useId, useRef } from 'react';
+import { AXIS_LENGTHS, clamp, getSeriesStyle, movePlot, parseValue, removeCategory, setChartValue } from '../chart';
 import type { Axis, AxisStyle, ChartDocument, ChartEdit, Datum, LineKind, SeriesStyle } from '../types';
+import AxisArrowheadField from './AxisArrowheadField';
 import ColorPicker from './ColorPicker';
 
 interface Props {
@@ -9,18 +11,18 @@ interface Props {
   onClose: () => void;
 }
 
-function NumberField({ label, value, onChange, nonnegative = false, normalize }: {
+function NumberField({ label, value, onChange, minimum, normalize }: {
   label: string; value: number | null | undefined; onChange: (value: number | null) => void;
-  nonnegative?: boolean; normalize?: (value: number) => number;
+  minimum?: number; normalize?: (value: number) => number;
 }) {
   return (
     <label>{label}
-      <input key={value ?? 'empty'} type="text" inputMode="decimal" placeholder={nonnegative ? '自动' : undefined} defaultValue={value ?? ''}
+      <input key={value ?? 'empty'} type="text" inputMode="decimal" placeholder={minimum !== undefined ? '自动' : undefined} defaultValue={value ?? ''}
         onBlur={event => {
           const input = event.currentTarget;
           try {
             const parsed = parseValue(input.value);
-            if (nonnegative && parsed !== null && parsed < 0) throw new Error();
+            if (minimum !== undefined && parsed !== null && parsed < minimum) throw new Error();
             const next = normalize ? parsed === null ? value ?? null : normalize(parsed) : parsed;
             input.value = String(next ?? '');
             if (next !== (value ?? null)) onChange(next);
@@ -59,11 +61,15 @@ function numericOptions(options: number[], value: number) {
   return [...new Set([...options, value])].sort((a, b) => a - b);
 }
 
-export function DataSelectionToolbar({ chart, datum, onEdit, onClose }: Props & { datum: Datum }) {
+export function DataSelectionToolbar({ chart, datum, onEdit, onClose, onRemoveSeries }: Props & {
+  datum: Datum; onRemoveSeries: (index: number) => void;
+}) {
   const series = chart.series[datum.series];
   const value = series.values[datum.index];
   const appearance = getSeriesStyle(series, chart.style);
   const category = chart.categories[datum.index];
+  const menuId = useId();
+  const menu = useRef<HTMLDivElement>(null);
 
   function format(changes: Partial<SeriesStyle>) {
     onEdit(chart => ({
@@ -82,13 +88,13 @@ export function DataSelectionToolbar({ chart, datum, onEdit, onClose }: Props & 
       <TextField label="系列" value={series.name} onChange={name => onEdit(chart => ({
         ...chart, series: chart.series.map((item, index) => index === datum.series ? { ...item, name } : item),
       }))} />
-      <div className="color-field"><span>系列颜色</span>
+      <div className="color-field"><span>颜色</span>
         <ColorPicker value={series.color} label="所选系列颜色" onChange={color => onEdit(chart => ({
           ...chart, series: chart.series.map((item, index) => index === datum.series ? { ...item, color } : item),
         }))} />
       </div>
-      <button className="button compact toolbar-toggle" aria-pressed={appearance.showLabels}
-        onClick={() => format({ showLabels: !appearance.showLabels })}><Tags size={15} /> 系列数据标签</button>
+      <button className="button compact toolbar-toggle" aria-pressed={appearance.showLabels} aria-label="系列数据标签"
+        onClick={() => format({ showLabels: !appearance.showLabels })}><Tags size={15} /> 数值标签</button>
       {chart.kind === 'line' ? (
         <>
           <label>线宽
@@ -111,6 +117,10 @@ export function DataSelectionToolbar({ chart, datum, onEdit, onClose }: Props & 
                     {numericOptions([3, 5, 7, 9, 11], appearance.dotSize).map(size => <option key={size} value={size}>{size}</option>)}
                   </select>
                 </label>
+                <button className="button compact toolbar-toggle" aria-label="实心数据点" aria-pressed={appearance.dotFill === 'solid'}
+                  title="切换该系列数据点的实心或空心" onClick={() => format({
+                    dotFill: appearance.dotFill === 'solid' ? 'hollow' : 'solid',
+                  })}>{appearance.dotFill === 'solid' ? '实心' : '空心'}</button>
               </>
             )}
           </div>
@@ -126,8 +136,31 @@ export function DataSelectionToolbar({ chart, datum, onEdit, onClose }: Props & 
             onClick={() => format({ roundedColumns: !appearance.roundedColumns })}>圆角柱形</button>
         </>
       )}
-      <button className="icon-button" aria-label="清除数据点" title="清除数据点" disabled={value === null}
-        onClick={() => onEdit(chart => setChartValue(chart, datum.series, datum.index, null))}><Trash2 size={16} /></button>
+      <button className="icon-button" aria-label="删除数据选项" title="清除数据点、删除类别或系列" popoverTarget={menuId}
+        onClick={event => {
+          const rect = event.currentTarget.getBoundingClientRect();
+          menu.current.style.left = `${Math.max(8, Math.min(rect.right - 146, document.documentElement.clientWidth - 154))}px`;
+          menu.current.style.top = `${Math.min(rect.bottom + 5, document.documentElement.clientHeight - 126)}px`;
+        }}><Trash2 size={16} /></button>
+      <div className="datum-delete-menu" popover="auto" id={menuId} ref={menu} role="group" aria-label="删除数据">
+        <button className="button compact" disabled={value === null} onClick={() => {
+          onEdit(chart => setChartValue(chart, datum.series, datum.index, null));
+          onClose();
+        }}>清除数据点</button>
+        <button className="button compact" disabled={chart.categories.length <= 1} onClick={() => {
+          onEdit(chart => removeCategory(chart, datum.index));
+          onClose();
+        }}>删除整个类别</button>
+        {chart.series.length > 1 ? (
+          <button className="button compact" onClick={() => onRemoveSeries(datum.series)}>删除整个系列</button>
+        ) : (
+          <button className="button compact" disabled={series.values.every(value => value === null)} onClick={() => {
+            onEdit(current => ({ ...current, scaleExtent: null, series: current.series.map((item, index) => index === datum.series
+              ? { ...item, values: item.values.map(() => null) } : item) }));
+            onClose();
+          }}>清空整个系列</button>
+        )}
+      </div>
       <button className="icon-button text-toolbar-close" aria-label="关闭数据点设置" onClick={onClose}><X size={17} /></button>
     </div>
   );
@@ -166,6 +199,7 @@ export function AxisSelectionToolbar({ chart, axis, onEdit, onClose, onSettings 
           <option value="arrow">带箭头</option><option value="solid">实线</option><option value="dashed">虚线</option>
         </select>
       </label>
+      <AxisArrowheadField style={chart.style} onEdit={onEdit} />
       <label>轴线宽度
         <select value={mixedWidth ? '' : style.width} onChange={event => update('width', Number(event.target.value))}>
           {mixedWidth && <option value="" disabled>混合</option>}
@@ -176,7 +210,8 @@ export function AxisSelectionToolbar({ chart, axis, onEdit, onClose, onSettings 
         const { min, max } = AXIS_LENGTHS[axis];
         return clamp(Math.round(value), min, max);
       }} onChange={value => { if (value !== null) update('length', value); }} />}
-      {axis === 'y' && <NumberField label="最大值" value={style.maximum} nonnegative onChange={value => update('maximum', value ?? undefined)} />}
+      {axis === 'y' && <NumberField label="最大值" value={style.maximum} minimum={Math.max(0, style.omitted?.to ?? 0)}
+        onChange={value => update('maximum', value ?? undefined)} />}
       {axis !== 'both' && (
         <>
           <button className="button compact toolbar-toggle" aria-pressed={style.showValues}

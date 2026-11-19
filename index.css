@@ -92,6 +92,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .board-heading, .board-heading > div { display: flex; align-items: center; justify-content: space-between; gap: 2px; }
 .board-heading h2 { margin: 0 0 0 3px; font-size: 14px; white-space: nowrap; }
 .board-heading .icon-button { width: 29px; height: 32px; }
+.board-clear.icon-button { color: #933b32; }
+.board-clear.icon-button:hover { color: #933b32; background: #fbeeea; }
 .board-list { display: grid; gap: 8px; margin-top: 8px; }
 .board-card { position: relative; min-width: 0; }
 .board-item { display: grid; gap: 5px; width: 100%; min-width: 0; padding: 6px; border: 1px solid var(--border); border-radius: 9px;
@@ -107,6 +109,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   border-radius: 7px; background: #f0f3fa; color: var(--muted); font-size: 12px;
 }
 .board-deletion .text-button { min-height: 26px; padding: 2px 3px; font-size: 12px; background: transparent; }
+.board-project { display: grid; gap: 4px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+.board-project small { padding-left: 4px; color: var(--muted); font-size: 12px; }
+.board-project small[role="alert"] { color: #933b32; }
+.board-project .text-button { justify-content: flex-start; padding: 2px 4px; }
 .workspace-toolbar {
   min-height: 67px;
   padding: 10px 15px;
@@ -117,6 +123,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   flex-wrap: wrap;
 }
 .toolbar-start, .toolbar-end { gap: 8px; }
+.random-chart-controls { display: flex; align-items: center; gap: 4px; }
+.random-chart-controls select { height: 34px; padding: 0 5px; color: var(--muted); font: inherit; font-size: 13px;
+  border: 1px solid var(--border); border-radius: 7px; background: #fff; }
 .zoom-control { display: flex; align-items: center; gap: 2px; border: 1px solid var(--border); border-radius: 8px; padding: 1px; }
 .zoom-control .icon-button { width: 28px; height: 30px; }
 .zoom-control .button { min-height: 30px; padding: 0 5px; min-width: 48px; font-variant-numeric: tabular-nums; }
@@ -183,6 +192,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .datum-toolbar { column-gap: 7px; }
 .datum-toolbar input[type="text"] { width: 60px; }
 .datum-toolbar input.toolbar-name-input { width: 78px; }
+.datum-delete-menu { inset: auto; margin: 0; width: 146px; min-height: 115px; padding: 5px; background: #fff;
+  border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 5px 16px #26386026; }
+.datum-delete-menu:popover-open { display: grid; gap: 3px; }
+.datum-delete-menu .button { justify-content: flex-start; }
 .text-toolbar .text-toolbar-close { margin-left: auto; }
 .color-field { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); font-size: 13px; white-space: nowrap; }
 .color-picker { position: relative; flex: none; }
@@ -303,7 +316,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .panel-content { display: grid; gap: 12px; align-content: start; padding: 14px; }
 .panel-actions { gap: 6px; flex-wrap: wrap; }
 .panel-actions .icon-button { margin-left: auto; }
-.paste-form { display: grid; gap: 8px; padding: 10px; border-radius: 8px; background: #f0f3fa; }
+.import-preview { display: grid; gap: 6px; min-width: 0; }
+.import-preview p { margin: 0; color: var(--muted); font-size: 12px; }
+.import-preview .data-table :is(td, th) { padding: 5px 8px; width: auto; white-space: nowrap; }
+.axis-break-settings { padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px; }
+.axis-break-settings summary { font-size: 13px; cursor: pointer; }
+.axis-break-settings form { display: grid; gap: 7px; margin-top: 8px; }
+.paste-form { display: grid; gap: 8px; min-width: 0; padding: 10px; border-radius: 8px; background: #f0f3fa; }
 .paste-form label { font-size: 12px; color: var(--muted); line-height: 1.5; }
 .paste-form textarea, .presets input { width: 100%; min-width: 0; padding: 7px; border: 1px solid var(--border); border-radius: 6px; }
 .paste-form textarea { resize: vertical; font-size: 13px; }

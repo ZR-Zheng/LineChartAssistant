@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
-import { AXIS_LENGTHS, DEFAULT_STYLE, clamp } from '../chart';
+import { AXIS_LENGTHS, DEFAULT_AXIS_ARROWHEAD, DEFAULT_STYLE, clamp, isAxisArrowhead, isAxisBreak } from '../chart';
 import { download } from '../downloads';
 import type { Axis, AxisStyle, ChartStyle } from '../types';
 
@@ -36,9 +36,11 @@ function applyPreset(config: Preset['config']): ChartStyle {
     showLabels: setting('showLabels'),
     dots: setting('dots'),
     showOrigin: setting('showOrigin'),
+    showTitle: config.showTitle !== false,
     dotSize: size('dotSize', 12),
     strokeWidth: size('strokeWidth', 10),
     axes: { x: presetAxis('x', config), y: presetAxis('y', config) },
+    axisArrowhead: isAxisArrowhead(config.axisArrowhead) ? config.axisArrowhead : DEFAULT_AXIS_ARROWHEAD,
     legend: typeof config.legend === 'boolean' ? config.legend : DEFAULT_STYLE.legend,
   };
 }
@@ -57,6 +59,7 @@ function presetAxis(axis: Axis, config: Preset['config']): AxisStyle {
   const validInterval = typeof interval === 'number' && Number.isFinite(interval) && interval > 0;
   const legacyMaximum = config.yAxisMax;
   const maximum = saved?.maximum ?? (typeof legacyMaximum === 'string' && legacyMaximum.trim() ? Number(legacyMaximum) : undefined);
+  const validMaximum = axis === 'y' && typeof maximum === 'number' && Number.isFinite(maximum) && maximum >= 0;
   const bounded = (value: unknown, min: number, max: number, defaultValue: number) =>
     typeof value === 'number' && Number.isFinite(value) ? clamp(value, min, max) : defaultValue;
   const range = AXIS_LENGTHS[axis];
@@ -71,7 +74,9 @@ function presetAxis(axis: Axis, config: Preset['config']): AxisStyle {
     tickMode: saved?.tickMode === 'auto' || saved?.tickMode === 'all' || saved?.tickMode === 'interval'
       ? saved.tickMode : validInterval ? 'interval' : 'auto',
     interval: validInterval ? (axis === 'x' ? Math.round(clamp(interval, 1, Number.MAX_SAFE_INTEGER)) : interval) : fallback.interval,
-    ...(axis === 'y' && typeof maximum === 'number' && Number.isFinite(maximum) && maximum >= 0 && { maximum }),
+    ...(validMaximum && { maximum }),
+    ...(axis === 'y' && isAxisBreak(saved?.omitted) && (!validMaximum || saved.omitted.to <= maximum) && { omitted: saved.omitted }),
+    visible: saved?.visible !== false,
     showValues: typeof saved?.showValues === 'boolean' ? saved.showValues : fallback.showValues,
     showLabel: typeof saved?.showLabel === 'boolean' ? saved.showLabel : config[`show${legacy}Label`] !== false,
     titlePlacement: saved?.titlePlacement === 'center' || saved?.titlePlacement === 'start' ? saved.titlePlacement : fallback.titlePlacement,

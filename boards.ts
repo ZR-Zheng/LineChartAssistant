@@ -12,7 +12,7 @@ export interface Board extends History {
   zoom: number;
 }
 
-interface Workspace {
+export interface Workspace {
   boards: Board[];
   activeId: number;
   nextId: number;
@@ -20,6 +20,8 @@ interface Workspace {
 }
 
 type Action =
+  | { type: 'load'; workspace: Workspace }
+  | { type: 'clear' }
   | { type: 'add'; chart?: ChartDocument }
   | { type: 'duplicate' }
   | { type: 'restore' }
@@ -33,11 +35,20 @@ function newBoard(id: number, chart: ChartDocument): Board {
   return { id, chart, past: [], future: [], zoom: 100 };
 }
 
+function singleBoardWorkspace(chart: ChartDocument): Workspace {
+  return { boards: [newBoard(1, chart)], activeId: 1, nextId: 2, deleted: [] };
+}
+
 export function initialWorkspace(): Workspace {
-  return { boards: [newBoard(1, sampleChart())], activeId: 1, nextId: 2, deleted: [] };
+  return singleBoardWorkspace(sampleChart());
 }
 
 export function boardReducer(workspace: Workspace, action: Action): Workspace {
+  if (action.type === 'load') return action.workspace;
+  if (action.type === 'clear') {
+    const current = workspace.boards.find(board => board.id === workspace.activeId);
+    return singleBoardWorkspace(blankChart(current.chart.kind));
+  }
   if (action.type === 'add' || action.type === 'duplicate') {
     const current = workspace.boards.find(board => board.id === workspace.activeId);
     const id = workspace.nextId;

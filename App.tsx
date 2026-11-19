@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import type { CSSProperties } from 'react';
+import type { ChangeEvent, CSSProperties } from 'react';
 import {
   ChartColumn, ChartNoAxesCombined, ChevronDown, Dices, Download, Eraser, Grid2X2, Info, Magnet, Minus,
   List, MousePointer2, MoveRight, MoveUpRight, PanelTop, Pencil, Plus, Redo2, SlidersHorizontal, Table2, Tags, Trash2, Type, Undo2,
@@ -12,12 +12,14 @@ import DataPanel from './components/DataPanel';
 import { AxisSelectionToolbar, DataSelectionToolbar } from './components/SelectionToolbar';
 import TextToolbar from './components/TextToolbar';
 import ToolbarStrip from './components/ToolbarStrip';
-import { boardReducer, initialWorkspace } from './boards';
-import { formatValue, getPlot, getScale, getSeriesStyle, getTextStyle, isNote, MAX_MANUAL_TICKS, removeNote, setChartValue,
+import { boardReducer } from './boards';
+import { formatValue, getPlot, getScale, getSeriesStyle, getTextStyle, hideText, isNote, MAX_MANUAL_TICKS, removeCategory, removeSeries, setChartValue,
   STATISTIC_LABELS, statistics, visibleMark } from './chart';
-import { exportChartImage, exportChartSvg } from './downloads';
+import { download, exportChartImage, exportChartSvg } from './downloads';
 import { NO_TARGETS, translateLine } from './alignment';
-import { randomChart } from './randomChart';
+import { EXERCISE_TOPICS, EXERCISE_TYPES, exerciseTypes, randomChart } from './randomChart';
+import type { ExerciseTopic, ExerciseType } from './randomChart';
+import { loadWorkspace, parseWorkspace, saveWorkspace, serializeWorkspace } from './workspaceStorage';
 import type { ArrowPlacement, Axis, ChartEdit, EraseScope, LineKind, Mark, Selection, Statistic, TextStyle, TitlePlacement, Tool } from './types';
 
 const TOOLS = [
@@ -37,7 +39,8 @@ const ERASER_OPTIONS = [
 const TOOLBAR_PREFERENCE = 'chartToolbarVisible';
 
 function App() {
-  const [workspace, dispatch] = useReducer(boardReducer, undefined, initialWorkspace);
+  const [workspace, dispatch] = useReducer(boardReducer, undefined, loadWorkspace);
+  const [projectRevision, setProjectRevision] = useState(0);
   const board = workspace.boards.find(item => item.id === workspace.activeId);
   const { chart, id, past, future, zoom } = board;
   const [tool, setTool] = useState<Tool>('select');
@@ -58,10 +61,16 @@ function App() {
   const [selectedSeries, setSelectedSeries] = useState(0);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState('');
+  const [saveFailed, setSaveFailed] = useState(false);
+  const [topic, setTopic] = useState<ExerciseTopic>('all');
+  const [exercise, setExercise] = useState<ExerciseType>('chart');
+  const projectFile = useRef<HTMLInputElement>(null);
   const svg = useRef<SVGSVGElement>(null);
   const desk = useRef<HTMLDivElement>(null);
 
   const activeSeries = Math.min(selectedSeries, chart.series.length - 1);
+  const availableExercises = exerciseTypes(chart.kind);
+  const currentExercise = availableExercises.includes(exercise) ? exercise : 'chart';
   const values = chart.series[activeSeries].values;
   const stats = useMemo(() => statistics(values), [values]);
   const onEdit: ChartEdit = update => dispatch({ type: 'edit', id, update });
@@ -72,10 +81,11 @@ function App() {
   const text = selection?.kind === 'text' ? selection.target : null;
   const datum = selection?.kind === 'data' ? selection.datum : null;
   const axis = selection?.kind === 'axis' ? selection.axis : null;
-  const activeText = text === 'xLabel' && !chart.style.axes.x.showLabel
-    || text === 'yLabel' && !chart.style.axes.y.showLabel
+  const activeText = text === 'xLabel' && (!chart.style.axes.x.showLabel || chart.style.axes.x.visible === false)
+    || text === 'yLabel' && (!chart.style.axes.y.showLabel || chart.style.axes.y.visible === false)
+    || text === 'title' && chart.style.showTitle === false
     || text !== null && isNote(text) && !chart.notes.some(note => note.id === text)
-    || typeof text === 'number' && text >= chart.categories.length ? null : text;
+    || typeof text === 'number' && (text >= chart.categories.length || chart.hiddenCategoryLabels?.includes(text)) ? null : text;
   const activeDatum = datum && chart.series[datum.series]?.values[datum.index] !== undefined ? datum : null;
   const currentInk = mark?.color ?? ink;
   const currentWidth = mark?.width ?? (mark ? 3.5 : inkWidth);
@@ -86,19 +96,31 @@ function App() {
   const showLegend = chart.style.legend === true || chart.style.legend === 'auto' && chart.series.length > 1;
   const yAxis = chart.style.axes.y;
   const limit = yAxis.maximum ?? Infinity;
-  const needScale = yAxis.tickMode !== 'auto' || tool === 'line' || mark?.referenceValue !== undefined;
+  const needScale = yAxis.tickMode !== 'auto' || tool === 'line' || mark?.referenceValue !== undefined || yAxis.omitted;
   const plot = getPlot(chart.style, chart.plotOffset);
   const scale = needScale ? getScale(chart.series, chart.scaleExtent, plot, yAxis) : null;
   const clipped = Number.isFinite(limit) ? chart.series.reduce((sum, item) =>
     sum + item.values.filter(value => value !== null && value > limit).length, 0) : 0;
+  const omitted = scale?.omission ? chart.series.reduce((sum, item) =>
+    sum + item.values.filter(value => value !== null && scale.inBreak(value)).length, 0) : 0;
   const notice = [
     scale?.tooManyTicks ? `纵轴超过 ${MAX_MANUAL_TICKS} 个刻度，暂用自动刻度。` : '',
     clipped ? `${clipped} 个数据值超出纵轴最大值，超出部分已裁切。` : '',
+    omitted ? `${omitted} 个数据值位于断轴省略区间，可在数据表中查看。` : '',
   ].filter(Boolean).join(' ');
 
   useEffect(() => {
     try { localStorage.setItem(TOOLBAR_PREFERENCE, String(toolbar)); } catch {}
   }, [toolbar]);
+
+  useEffect(() => {
+    try {
+      saveWorkspace(workspace);
+      setSaveFailed(false);
+    } catch {
+      setSaveFailed(true);
+    }
+  }, [workspace]);
 
   useEffect(() => {
     const viewport = desk.current;
@@ -133,13 +155,45 @@ function App() {
     if (id === action) return;
     resetBoardControls();
     if (typeof action === 'number') dispatch({ type: 'select', id: action });
-    else if (action === 'random') dispatch({ type: 'add', chart: randomChart(chart.kind) });
+    else if (action === 'random') dispatch({ type: 'add', chart: randomChart(chart.kind, Math.random, topic, currentExercise) });
     else dispatch({ type: action });
   }
 
   function deleteBoard(boardId: number) {
     if (id === boardId) resetBoardControls();
     dispatch({ type: 'delete', id: boardId });
+  }
+
+  function clearBoards() {
+    if (!window.confirm(`清空 ${workspace.boards.length} 张画布及已删除的画布记录？此操作无法撤销。`)) return;
+    resetBoardControls();
+    setProjectRevision(revision => revision + 1);
+    dispatch({ type: 'clear' });
+  }
+
+  function deleteSeries(index: number) {
+    if (chart.series.length <= 1) return;
+    choose(null);
+    onEdit(current => removeSeries(current, index));
+    if (index <= activeSeries) setSelectedSeries(Math.max(0, activeSeries - 1));
+  }
+
+  function backupProject() {
+    download(new Blob([serializeWorkspace(workspace)], { type: 'application/json' }), '统计图画板.json');
+  }
+
+  async function restoreProject(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = '';
+    if (!file) return;
+    try {
+      const restored = parseWorkspace(await file.text());
+      if (!window.confirm(`恢复项目中的 ${restored.boards.length} 张画布？这会替换当前项目。`)) return;
+      resetBoardControls();
+      dispatch({ type: 'load', workspace: restored });
+    } catch {
+      setError('无法恢复项目。请选择由统计图画板导出的 JSON 文件。');
+    }
   }
 
   function formatText(changes: Partial<TextStyle>) {
@@ -186,11 +240,16 @@ function App() {
 
   function removeSelection() {
     if (mark) onEdit(current => ({ ...current, marks: current.marks.filter((_, index) => index !== markIndex) }));
-    else if (activeText !== null && isNote(activeText)) {
-      const note = activeText;
-      onEdit(current => removeNote(current, note));
+    else if (activeText !== null) {
+      onEdit(current => hideText(current, activeText));
     } else if (activeDatum) {
       onEdit(current => setChartValue(current, activeDatum.series, activeDatum.index, null));
+    } else if (axis) {
+      onEdit(current => {
+        const { x, y } = current.style.axes;
+        const axes = { x: axis === 'y' ? x : { ...x, visible: false }, y: axis === 'x' ? y : { ...y, visible: false } };
+        return { ...current, style: { ...current.style, axes } };
+      });
     } else return;
     choose(null);
   }
@@ -233,8 +292,8 @@ function App() {
       }
       const next = TOOLS.find(item => item.key === key);
       if (next) changeTool(next.id);
-      if (key === 'escape') choose(null);
-      if ((key === 'delete' || key === 'backspace') && (mark || activeDatum || activeText !== null && isNote(activeText))) {
+      if (key === 'escape' && !document.querySelector('.datum-delete-menu:popover-open')) choose(null);
+      if ((key === 'delete' || key === 'backspace') && (mark || activeDatum || activeText !== null || axis)) {
         event.preventDefault();
         removeSelection();
       }
@@ -251,7 +310,7 @@ function App() {
     }
     window.addEventListener('keydown', shortcuts);
     return () => window.removeEventListener('keydown', shortcuts);
-  }, [id, mark, markIndex, activeDatum, activeText, mark?.referenceValue === undefined ? null : chart]);
+  }, [id, mark, markIndex, activeDatum, activeText, axis, mark?.referenceValue === undefined ? null : chart]);
 
   async function exportImage() {
     if (!svg.current || exporting) return;
@@ -279,11 +338,15 @@ function App() {
         titlePlacement={axis && {
           axis, value: chart.style.axes[axis].titlePlacement, onChange: value => placeAxisTitle(axis, value),
         }}
-        onChange={formatText} onClose={() => choose(null)} onDelete={isNote(activeText) ? removeSelection : undefined} />;
+        onChange={formatText} onClose={() => choose(null)} onDelete={removeSelection}
+        onDeleteCategory={typeof activeText === 'number' && chart.categories.length > 1 ? () => {
+          onEdit(current => removeCategory(current, activeText));
+          choose(null);
+        } : undefined} />;
     }
     if (tool === 'text') return <TextToolbar target="note:0" style={newTextStyle}
       onChange={changes => setNewTextStyle(previous => ({ ...previous, ...changes }))} />;
-    if (activeDatum) return <DataSelectionToolbar chart={chart} datum={activeDatum} onEdit={onEdit} onClose={() => choose(null)} />;
+    if (activeDatum) return <DataSelectionToolbar chart={chart} datum={activeDatum} onEdit={onEdit} onClose={() => choose(null)} onRemoveSeries={deleteSeries} />;
     if (axis) return <AxisSelectionToolbar chart={chart} axis={axis} onEdit={onEdit} onClose={() => choose(null)} onSettings={openAxes} />;
     if (tool === 'line' || tool === 'pen' || mark) return (
       <div className="drawing-toolbar" aria-label="标注设置" role="group">
@@ -359,6 +422,9 @@ function App() {
     );
     return (
       <div className="drawing-toolbar" aria-label="画布设置" role="group">
+        <button className="button quiet" aria-pressed={chart.style.showTitle !== false} onClick={() => onEdit(current => ({
+          ...current, style: { ...current.style, showTitle: current.style.showTitle === false },
+        }))}><Type size={16} /> 图表标题</button>
         <button className="button quiet" aria-pressed={chart.style.grid} onClick={() => onEdit(current => ({
           ...current, style: { ...current.style, grid: !current.style.grid },
         }))}><Grid2X2 size={16} /> 网格线</button>
@@ -423,8 +489,16 @@ function App() {
                   <button className="icon-button" aria-label="重做" title="重做（Ctrl / ⌘ + Shift + Z）" disabled={!future.length}
                     onClick={() => navigateHistory('redo')}><Redo2 size={19} /></button>
                 </div>
-                <button className="button compact random-chart-button" title="按当前图表类型随机生成练习图，并添加到新画布"
-                  onClick={() => changeBoard('random')}><Dices size={16} /> 随机生成</button>
+                <div className="random-chart-controls">
+                  <select aria-label="出题题材" title="出题题材" value={topic} onChange={event => setTopic(event.target.value as ExerciseTopic)}>
+                    {Object.entries(EXERCISE_TOPICS).map(([value, name]) => <option key={value} value={value}>{name}</option>)}
+                  </select>
+                  <select aria-label="出题题型" title="出题题型" value={currentExercise} onChange={event => setExercise(event.target.value as ExerciseType)}>
+                    {availableExercises.map(value => <option key={value} value={value}>{EXERCISE_TYPES[value]}</option>)}
+                  </select>
+                  <button className="button compact random-chart-button" title="按所选题材、题型和当前图表类型生成新画布"
+                    onClick={() => changeBoard('random')}><Dices size={16} /> 随机生成</button>
+                </div>
               </div>
               <div className="toolbar-end">
                 <div className="zoom-control" role="group" aria-label="画布缩放">
@@ -455,7 +529,7 @@ function App() {
                 ))}
               </nav>
               <div ref={desk} className="desk" data-zoomed={zoom > 100 || undefined} style={{ '--paper-zoom': zoom / 100 } as CSSProperties}>
-                <div className="paper-frame" key={id}>
+                <div className="paper-frame" key={`${projectRevision}:${id}`}>
                   <ChartDisplay document={chart} tool={tool} ink={currentInk} inkWidth={currentWidth}
                     inkOpacity={currentOpacity} inkArrows={currentArrows} newTextStyle={newTextStyle} eraseScope={eraseScope}
                     lineKind={currentLineKind} snap={snap} selection={selection} onSelect={choose} stats={stats} onAddStatistic={addStatistic}
@@ -463,7 +537,7 @@ function App() {
                 </div>
               </div>
               {panel === 'data' && <DataPanel chart={chart} onEdit={onEdit} activeSeries={activeSeries}
-                onSelectSeries={setSelectedSeries} onReplaceCategories={() => choose(null)} onClose={() => setPanel(null)} />}
+                onSelectSeries={setSelectedSeries} onReplaceCategories={() => choose(null)} onRemoveSeries={deleteSeries} onClose={() => setPanel(null)} />}
               {panel === 'axes' && <AxisPanel axis={axisTab} onSelectAxis={setAxisTab} chart={chart} onEdit={onEdit} onClose={() => setPanel(null)} />}
             </div>
             <footer className="workspace-footer">
@@ -473,7 +547,9 @@ function App() {
           </section>
           <BoardSidebar boards={workspace.boards} activeId={id} onSelect={changeBoard}
             deletedId={workspace.deleted.at(-1)?.board.id} onDelete={deleteBoard} onRestore={() => changeBoard('restore')}
-            onAdd={() => changeBoard('add')} onDuplicate={() => changeBoard('duplicate')} />
+            onAdd={() => changeBoard('add')} onDuplicate={() => changeBoard('duplicate')} saveFailed={saveFailed} onClear={clearBoards}
+            onBackup={backupProject} onRecover={() => projectFile.current.click()} />
+          <input type="file" accept=".json,application/json" hidden ref={projectFile} onChange={restoreProject} />
         </div>
       </main>
     </>

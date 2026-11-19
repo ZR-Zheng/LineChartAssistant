@@ -1,4 +1,4 @@
-import type { Axis, AxisStyle, ChartDocument, ChartStyle, Mark, NoteTarget, Point, Series, SeriesStyle,
+import type { Axis, AxisArrowhead, AxisStyle, ChartDocument, ChartStyle, Mark, NoteTarget, Point, Series, SeriesStyle,
   Statistic, TextFont, TextStyle, TextTarget } from './types';
 
 export const WIDTH = 920;
@@ -22,6 +22,20 @@ export const AXIS_TITLE_PLACEMENTS = {
   x: { end: '轴端右下方', center: '下方居中', start: '左下方' },
   y: { end: '轴顶上方居中', center: '左侧居中（旋转）', start: '左上方' },
 } as const;
+export const AXIS_ARROWHEADS: Record<AxisArrowhead, string> = { open: '简式', outline: '空心三角', filled: '实心三角' };
+export const DEFAULT_AXIS_ARROWHEAD: AxisArrowhead = 'filled';
+
+export function isAxisArrowhead(value: unknown): value is AxisArrowhead {
+  return typeof value === 'string' && Object.hasOwn(AXIS_ARROWHEADS, value);
+}
+
+export function arrowheadLength(width: number) {
+  return Math.max(8, width * 3.6);
+}
+
+export function verticalAxisExtension({ line, width }: AxisStyle) {
+  return line === 'arrow' ? Math.max(18, Math.ceil(arrowheadLength(width) + width / 2 + 6)) : 8;
+}
 
 const BASE_AXIS: AxisStyle = {
   line: 'arrow',
@@ -45,6 +59,7 @@ export const DEFAULT_STYLE: ChartStyle = {
   dotSize: 5,
   strokeWidth: 3,
   axes: { x: BASE_AXIS, y: { ...BASE_AXIS, length: DEFAULT_PLOT.bottom - DEFAULT_PLOT.top } },
+  axisArrowhead: DEFAULT_AXIS_ARROWHEAD,
   legend: 'auto',
 };
 
@@ -128,7 +143,8 @@ export function movePlot(chart: ChartDocument, offset: Point): ChartDocument {
 export function axisTitleLayout(axis: Axis, plot: Plot, chart: ChartDocument, zero = plot.bottom) {
   const placement = chart.style.axes[axis].titlePlacement ?? 'end';
   if (placement === 'end' && axis === 'y') {
-    return { point: { x: plot.left, y: plot.top - 34 }, anchor: 'middle' as const, rotation: 0 };
+    const offset = Math.max(34, verticalAxisExtension(chart.style.axes.y) + 10);
+    return { point: { x: plot.left, y: plot.top - offset }, anchor: 'middle' as const, rotation: 0 };
   }
   if (placement === 'end' && axis === 'x') {
     const x = plot.right + 20;
@@ -138,7 +154,8 @@ export function axisTitleLayout(axis: Axis, plot: Plot, chart: ChartDocument, ze
   }
   const anchor = placement === 'center' ? 'middle' as const : 'start' as const;
   const center = (plot.left + plot.right) / 2;
-  const y = axis === 'x' ? plot.bottom + 65 : placement === 'center' ? (plot.top + plot.bottom) / 2 : plot.top - 22;
+  const y = axis === 'x' ? plot.bottom + 65 : placement === 'center' ? (plot.top + plot.bottom) / 2
+    : plot.top - Math.max(22, verticalAxisExtension(chart.style.axes.y) + 8);
   const x = axis === 'x' ? (placement === 'start' ? plot.left : center)
     : placement === 'center' ? Math.max(15, plot.left - 69) : plot.left - 45;
   return { point: { x, y }, anchor,
@@ -158,6 +175,41 @@ export function removeNote(chart: ChartDocument, id: NoteTarget): ChartDocument 
   const textStyles = { ...chart.textStyles };
   delete textStyles[id];
   return { ...chart, textStyles, notes: chart.notes.filter(note => note.id !== id) };
+}
+
+export function setCategoryLabelVisible(chart: ChartDocument, index: number, visible: boolean): ChartDocument {
+  const hidden = chart.hiddenCategoryLabels ?? [];
+  return { ...chart, hiddenCategoryLabels: visible ? hidden.filter(item => item !== index) : [...new Set([...hidden, index])] };
+}
+
+export function hideText(chart: ChartDocument, target: TextTarget): ChartDocument {
+  if (isNote(target)) return removeNote(chart, target);
+  if (typeof target === 'number') return setCategoryLabelVisible(chart, target, false);
+  if (target === 'title') return { ...chart, style: { ...chart.style, showTitle: false } };
+  const axis = target === 'xLabel' ? 'x' : 'y';
+  const { axes } = chart.style;
+  return { ...chart, style: { ...chart.style, axes: { ...axes, [axis]: { ...axes[axis], showLabel: false } } } };
+}
+
+export function removeCategory(chart: ChartDocument, index: number): ChartDocument {
+  if (chart.categories.length <= 1 || chart.categories[index] === undefined) return chart;
+  const textStyles = { ...chart.textStyles };
+  for (let i = index; i < chart.categories.length - 1; i++) {
+    if (textStyles[i + 1]) textStyles[i] = textStyles[i + 1];
+    else delete textStyles[i];
+  }
+  delete textStyles[chart.categories.length - 1];
+  return {
+    ...chart, textStyles, scaleExtent: null,
+    hiddenCategoryLabels: chart.hiddenCategoryLabels?.filter(i => i !== index).map(i => i > index ? i - 1 : i),
+    categories: chart.categories.filter((_, i) => i !== index),
+    series: chart.series.map(item => ({ ...item, values: item.values.filter((_, i) => i !== index) })),
+  };
+}
+
+export function removeSeries(chart: ChartDocument, index: number): ChartDocument {
+  if (chart.series.length <= 1 || !chart.series[index]) return chart;
+  return { ...chart, scaleExtent: null, series: chart.series.filter((_, i) => i !== index) };
 }
 
 export function statistics(values: (number | null)[]): Record<Statistic, number> | null {
@@ -195,6 +247,7 @@ export function getSeriesStyle(series: Series, chartStyle: ChartStyle): SeriesSt
     strokeWidth: chartStyle.strokeWidth,
     dotSize: chartStyle.dotSize,
     dotShape: 'circle',
+    dotFill: 'hollow',
     dots: chartStyle.dots,
     showLabels: chartStyle.showLabels,
     columnWidth: 0.86,
@@ -227,13 +280,21 @@ export function parseValue(value: string): number | null {
   return Number(input);
 }
 
+export function isAxisBreak(value: unknown): value is import('./types').AxisBreak {
+  if (!value || typeof value !== 'object' || !('from' in value) || !('to' in value)) return false;
+  const { from, to } = value;
+  return typeof from === 'number' && typeof to === 'number' && Number.isFinite(from) && Number.isFinite(to)
+    && from < to && (from >= 0 || to <= 0);
+}
+
 export function getScale(
   series: ChartDocument['series'],
   extent: ChartDocument['scaleExtent'] = null,
   plot: Plot = DEFAULT_PLOT,
-  axis: Pick<AxisStyle, 'tickMode' | 'interval' | 'maximum'> = BASE_AXIS,
+  axis: Pick<AxisStyle, 'tickMode' | 'interval' | 'maximum' | 'omitted'> = BASE_AXIS,
 ) {
   const limit = axis.maximum ?? Infinity;
+  const omitted = isAxisBreak(axis.omitted) && axis.omitted.to <= limit ? axis.omitted : null;
   let min = extent?.min ?? 0;
   let max = axis.maximum ?? extent?.max ?? 0;
   for (const item of extent ? [] : series) {
@@ -241,6 +302,16 @@ export function getScale(
       if (value === null) continue;
       min = Math.min(min, value);
       if (axis.maximum === undefined) max = Math.max(max, value);
+    }
+  }
+
+  if (omitted) {
+    min = Math.min(min, omitted.from);
+    max = Math.max(max, omitted.to);
+    if (min === omitted.from && max === omitted.to) {
+      const pad = (omitted.to - omitted.from) / 10 || 1;
+      if (axis.maximum === undefined && max < Number.MAX_VALUE) max = Math.min(Number.MAX_VALUE, max + pad);
+      else min = Math.max(-Number.MAX_VALUE, min - pad);
     }
   }
 
@@ -253,53 +324,91 @@ export function getScale(
   const unit = 10 ** clamp(exponent, -300, 300);
   const low = min / unit;
   const high = max / unit;
-  const target = (high - low) / 6;
-  const base = 10 ** Math.floor(Math.log10(target));
+  const breakFrom = omitted ? omitted.from / unit : 0;
+  const breakTo = omitted ? omitted.to / unit : 0;
+  const split = omitted && breakTo > breakFrom && (breakFrom > low || breakTo < high) ? omitted : null;
+  const span = split ? breakFrom - low + (high - breakTo) : high - low;
+  const target = Math.max(Number.MIN_VALUE, span / 6);
+  const base = Math.max(Number.MIN_VALUE, 10 ** Math.floor(Math.log10(target)));
   const step = ([1, 2, 2.5, 5, 10].find(factor => factor * base >= target) ?? 10) * base;
   const bottomTick = Math.floor(round(low / step));
   const topTick = Math.ceil(round(high / step));
   const bound = Number.MAX_VALUE / unit;
-  const lower = Math.max(bottomTick * step, -bound);
-  const upper = axis.maximum === undefined ? Math.min(topTick * step, bound) : high;
+  const lower = Math.min(low, Math.max(bottomTick * step, -bound));
+  const upper = axis.maximum === undefined ? Math.max(high, Math.min(topTick * step, bound)) : high;
   const increment = step * unit >= 1 ? Math.max(1, step * unit / 5) : step * unit / 5;
   const fromNormalized = (normalized: number) => Math.abs(normalized) >= bound
     ? Math.sign(normalized) * Number.MAX_VALUE : round(normalized * unit);
+  const lowerValue = Math.min(min, fromNormalized(lower));
+  const upperValue = axis.maximum ?? Math.max(max, fromNormalized(upper));
+  const ranges = split ? [[lower, breakFrom], [breakTo, upper]] : [[lower, upper]];
+  const bands = split ? [{ min: lowerValue, max: split.from }, { min: split.to, max: upperValue }]
+    : [{ min: lowerValue, max: upperValue }];
+  const height = plot.bottom - plot.top;
+  const gap = split ? Math.min(18, height / 5) : 0;
+  const drawnSpan = split ? breakFrom - lower + (upper - breakTo) : upper - lower;
+  const drawHeight = height - gap;
+  const gapBottom = split ? plot.bottom - (breakFrom - lower) / drawnSpan * drawHeight : plot.bottom;
+  const gapTop = gapBottom - gap;
+  const inBreak = (value: number) => Boolean(split && value > split.from && value < split.to);
   const manual = axis.tickMode === 'all' || axis.tickMode === 'interval';
   const allStep = magnitude < 1 ? Math.max(10 ** exponent, Number.MIN_VALUE) : 1;
   const requestedStep = (axis.tickMode === 'all' ? allStep : axis.interval) / unit;
-  const manualTickCount = requestedStep > 0 ? Math.floor(round(upper / requestedStep)) - Math.ceil(round(lower / requestedStep)) : Infinity;
-  const tooManyTicks = manual && (!Number.isFinite(manualTickCount) || manualTickCount > MAX_MANUAL_TICKS);
+  function tickRange(start: number, end: number, spacing: number) {
+    return [Math.ceil(round(start / spacing)), Math.floor(round(end / spacing))];
+  }
+  const manualRanges = ranges.map(([start, end]) => tickRange(start, end, requestedStep));
+  const manualTickCount = manualRanges.reduce((sum, [start, end]) => sum + Math.max(0, end - start + 1), 0);
+  const tooManyTicks = manual && (requestedStep <= 0 || !Number.isFinite(manualTickCount) || manualTickCount > MAX_MANUAL_TICKS
+    || manualRanges.some(pair => pair.some(index => !Number.isSafeInteger(index))));
   const visibleStep = manual && !tooManyTicks ? requestedStep : step;
   const ticks = new Set<number>();
-  if (Number.isFinite(visibleStep)) {
-    for (let index = Math.ceil(round(lower / visibleStep)); index <= Math.floor(round(upper / visibleStep)); index++) {
-      const value = fromNormalized(index * visibleStep);
-      if (value !== 0 && value <= limit) ticks.add(value);
+  for (const [start, end] of ranges) {
+    const [first, last] = tickRange(start, end, visibleStep);
+    if (Number.isSafeInteger(first) && Number.isSafeInteger(last)) {
+      for (let index = first; index <= last && index - first <= MAX_MANUAL_TICKS; index++) {
+        const value = fromNormalized(index * visibleStep);
+        if (value !== 0 && value <= limit && !inBreak(value)) ticks.add(value);
+      }
     }
+  }
+  if (split) {
+    if (split.from !== 0) ticks.add(split.from);
+    if (split.to !== 0) ticks.add(split.to);
   }
 
   return {
     extent: { min, max },
     limit,
-    ticks: [...ticks],
+    ticks: [...ticks].sort((a, b) => a - b),
+    bands,
+    inBreak,
+    omission: split ? { ...split, top: gapTop, bottom: gapBottom } : null,
     tooManyTicks,
-    tickSpacing: (plot.bottom - plot.top) * (visibleStep / (upper - lower)),
+    tickSpacing: drawHeight * (visibleStep / drawnSpan),
     includes(value: number) {
-      const maximum = axis.maximum ?? Math.max(max, fromNormalized(upper));
-      return value >= Math.min(min, fromNormalized(lower)) && value <= maximum;
+      return value >= lowerValue && value <= upperValue && !inBreak(value);
     },
     y(value: number) {
-      return plot.bottom - (value / unit - lower) / (upper - lower) * (plot.bottom - plot.top);
+      if (!split || value <= split.from) return plot.bottom - (value / unit - lower) / drawnSpan * drawHeight;
+      if (value >= split.to) return gapTop - (value / unit - breakTo) / drawnSpan * drawHeight;
+      return gapBottom - (value / unit - breakFrom) / (breakTo - breakFrom) * gap;
     },
     valueAt(y: number) {
-      const ratio = clamp((plot.bottom - y) / (plot.bottom - plot.top), 0, 1);
+      const band = split && y <= gapTop ? bands[1] : bands[0];
+      if (split && y >= gapTop && y <= gapBottom) return y - gapTop <= gapBottom - y ? split.to : split.from;
+      const ratio = clamp((plot.bottom - y - (band === bands[1] ? gap : 0)) / drawHeight, 0, 1);
       if (ratio === 1 && axis.maximum !== undefined) return axis.maximum;
-      const value = fromNormalized(lower + ratio * (upper - lower));
+      const normalized = band === bands[1] ? breakTo + (gapTop - Math.max(y, plot.top)) / drawHeight * drawnSpan
+        : lower + ratio * drawnSpan;
+      const value = fromNormalized(normalized);
       return increment > 0 ? clamp(round(Math.round(value / increment) * increment),
-        fromNormalized(lower), axis.maximum ?? fromNormalized(upper)) : value;
+        band.min, band.max) : clamp(value, band.min, band.max);
     },
     nudge(value: number, direction: number) {
       const next = round(clamp(value + (increment || Number.MIN_VALUE) * direction, -Number.MAX_VALUE, Number.MAX_VALUE));
+      if (split && (inBreak(next) || direction > 0 && value === split.from && next === value
+        || direction < 0 && value === split.to && next === value)) return direction > 0 ? split.to : split.from;
       return Math.min(next, limit);
     },
   };
