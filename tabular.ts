@@ -1,4 +1,5 @@
 import { parseValue, SERIES_COLORS } from './chart';
+import type { PictographSymbol } from './pictographSymbols';
 import type { ChartDocument } from './types';
 
 function parseRows(input: string, delimiter: string) {
@@ -98,14 +99,19 @@ export function replaceTable(chart: ChartDocument, data: TableData): ChartDocume
   chart.categories.forEach((_, index) => delete textStyles[index]);
   const previousCategories = chart.categories.map((name, index) => ({ name, index }));
   const hiddenCategoryLabels: number[] = [];
+  const pieColors = chart.pieColors ? data.categories.map(() => null as string | null) : undefined;
+  const pictographSymbols = chart.pictographSymbols ? data.categories.map<PictographSymbol | null>(() => null) : undefined;
   data.categories.forEach((name, index) => {
     const match = previousCategories.findIndex(previous => previous.name === name);
     if (match < 0) return;
     const [previous] = previousCategories.splice(match, 1);
     if (chart.textStyles[previous.index]) textStyles[index] = chart.textStyles[previous.index];
     if (chart.hiddenCategoryLabels?.includes(previous.index)) hiddenCategoryLabels.push(index);
+    if (pieColors) pieColors[index] = chart.pieColors[previous.index] ?? null;
+    if (pictographSymbols) pictographSymbols[index] = chart.pictographSymbols[previous.index] ?? null;
   });
-  return { ...chart, ...data, series, textStyles, hiddenCategoryLabels, scaleExtent: null };
+  return { ...chart, ...data, series, textStyles, hiddenCategoryLabels, pieColors, pictographSymbols,
+    pieSeries: undefined, barSeries: undefined, pictographSeries: undefined, scaleExtent: null };
 }
 
 export function parseTableBlock(text: string, row: number, column: number) {

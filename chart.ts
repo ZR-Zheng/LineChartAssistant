@@ -1,12 +1,58 @@
-import type { Axis, AxisArrowhead, AxisStyle, ChartDocument, ChartStyle, Mark, NoteTarget, Point, Series, SeriesStyle,
-  Statistic, TextFont, TextStyle, TextTarget } from './types';
+import type { Axis, AxisArrowhead, AxisStyle, ChartDocument, ChartKind, ChartStyle, Mark, NoteTarget, PieStyle, Point, Series, SeriesStyle,
+  Statistic, TextFont, TextNote, TextStyle, TextTarget } from './types';
 
 export const WIDTH = 920;
 export const HEIGHT = 560;
 const DEFAULT_PLOT = { left: 100, right: 836, top: 124, bottom: 410 };
+export const EXERCISE_POSITION = { x: DEFAULT_PLOT.left, y: HEIGHT + 32 };
 export type Plot = typeof DEFAULT_PLOT;
 export const AXIS_LENGTHS = { x: { min: 240, max: 770 }, y: { min: 150, max: 318 } } as const;
 export const SERIES_COLORS = ['#3455c5', '#b95030', '#087e77', '#8354a3', '#8a660c', '#a73f63'];
+const PIE_PALETTES: Record<PieStyle['palette'], string[]> = {
+  classic: [...SERIES_COLORS, '#56804a', '#186b93', '#d28b22', '#b5448a', '#6b688a', '#964b41'],
+  pastel: ['#a8bce7', '#efb59d', '#99caba', '#d1b1df', '#f2ce80', '#dfa7be', '#b8ce93', '#9ecbdd'],
+  ocean: ['#17416e', '#087e77', '#4393b2', '#4155a1', '#69b5bb', '#466f8b', '#70a99b', '#a7c4e9'],
+  monochrome: ['#314059', '#52617a', '#76839a', '#a1acbc', '#bfc8d5', '#d9e1eb', '#eef1f6', '#49546a'],
+};
+export const PIE_PALETTE_NAMES: Record<PieStyle['palette'], string> = { classic: '经典', pastel: '柔和', ocean: '海蓝', monochrome: '灰蓝' };
+export const PIE_PRESETS = {
+  classic: { label: '经典扇形', style: { holeRatio: 0, palette: 'classic', separatorWidth: 2, separatorColor: '#ffffff' } },
+  donut: { label: '海蓝环形', style: { holeRatio: 0.5, palette: 'ocean', separatorWidth: 2, separatorColor: '#ffffff' } },
+  pastel: { label: '柔和扁平', style: { holeRatio: 0, palette: 'pastel', separatorWidth: 0, separatorColor: '#ffffff' } },
+  outline: { label: '灰蓝描边', style: { holeRatio: 0, palette: 'monochrome', separatorWidth: 2, separatorColor: '#334155' } },
+} as const;
+export const DEFAULT_GROUP_WIDTH = 0.72;
+export const DEFAULT_PIE_STYLE: PieStyle = {
+  ...PIE_PRESETS.classic.style, radius: 155, startAngle: 0, clockwise: true, order: 'data', labelMode: 'percent',
+  percentageDigits: 1, labelFont: 'system', labelFontSize: 15, labelPlacement: 'middle', legendSide: 'right',
+  legendFont: 'system', legendFontSize: 14, legendColor: '#485861', legendRowGap: 6, legendMarker: 'square',
+  legendMarkerSize: 12, legendMarkerGap: 5, legendContent: 'follow',
+};
+
+export function isGroupWidth(value: unknown): value is number {
+  return typeof value === 'number' && value >= 0.5 && value <= 0.92;
+}
+
+export function isPieStyle(value: unknown): value is Partial<PieStyle> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const style = value as Partial<PieStyle>;
+  const integer = (value: unknown, min: number, max: number) => value === undefined
+    || typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max;
+  const choices = (value: unknown, ...options: string[]) => value === undefined || options.includes(value as string);
+  const color = (value: unknown) => value === undefined || typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
+  const font = (value: unknown) => value === undefined || typeof value === 'string' && Object.hasOwn(TEXT_FONTS, value);
+  return integer(style.radius, 125, 176) && integer(style.startAngle, 0, 359) && integer(style.separatorWidth, 0, 4)
+    && integer(style.percentageDigits, 0, 2) && integer(style.labelFontSize, 10, 22)
+    && integer(style.legendFontSize, 10, 22) && integer(style.legendRowGap, 2, 14)
+    && integer(style.legendMarkerSize, 7, 18) && integer(style.legendMarkerGap, 2, 12)
+    && (style.holeRatio === undefined || typeof style.holeRatio === 'number' && style.holeRatio >= 0 && style.holeRatio <= 0.68)
+    && (style.clockwise === undefined || typeof style.clockwise === 'boolean')
+    && choices(style.palette, ...Object.keys(PIE_PALETTES)) && choices(style.order, 'data', 'desc', 'asc')
+    && choices(style.labelMode, 'percent', 'value', 'both') && choices(style.labelPlacement, 'middle', 'rim')
+    && choices(style.legendSide, 'left', 'right') && choices(style.legendMarker, 'square', 'circle', 'line')
+    && choices(style.legendContent, 'follow', 'category', 'percent', 'value', 'both')
+    && color(style.separatorColor) && color(style.labelColor) && color(style.legendColor) && font(style.labelFont) && font(style.legendFont);
+}
 export const FONT = 'system-ui, "Microsoft YaHei", "PingFang SC", sans-serif';
 export const TEXT_SIZE = { min: 8, max: 56 };
 export const TEXT_FONTS: Record<TextFont, { label: string; family: string }> = {
@@ -63,14 +109,17 @@ export const DEFAULT_STYLE: ChartStyle = {
   legend: 'auto',
 };
 
-export function blankChart(kind: ChartDocument['kind'] = 'line'): ChartDocument {
+export function blankChart(kind: ChartDocument['kind'] = 'line', groupedColumns = false): ChartDocument {
   return {
     kind,
+    ...(kind === 'bar' && { groupedColumns }),
     title: '未命名统计图',
     xLabel: '类别',
     yLabel: '数量',
     categories: ['A', 'B', 'C', 'D', 'E', 'F'],
-    series: [{ name: '数据 1', color: SERIES_COLORS[0], values: Array(6).fill(null) }],
+    series: Array.from({ length: kind === 'bar' && groupedColumns ? 2 : 1 }, (_, index) => ({
+      name: `数据 ${index + 1}`, color: SERIES_COLORS[index], values: Array(6).fill(null),
+    })),
     marks: [],
     notes: [],
     plotOffset: { x: 0, y: 0 },
@@ -106,6 +155,23 @@ export function setChartValue(document: ChartDocument, seriesIndex: number, inde
 
 export function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+export function shorten(text: string, max: number) {
+  const letters = Array.from(text);
+  return letters.length > max ? letters.slice(0, max - 1).join('') + '…' : text;
+}
+
+export function estimateTextWidth(text: string, fontSize: number) {
+  return Array.from(text).reduce((width, letter) => width + (letter.codePointAt(0) <= 127 ? 0.66 : 1), 0) * fontSize;
+}
+
+export function isLightColor(color: string) {
+  const rgb = Number.parseInt(color.slice(1), 16);
+  const red = (rgb >> 16) & 255;
+  const green = (rgb >> 8) & 255;
+  const blue = rgb & 255;
+  return red * 0.299 + green * 0.587 + blue * 0.114 > 155;
 }
 
 export function constrainPlotOffset(style: ChartStyle, offset: Point) {
@@ -202,6 +268,8 @@ export function removeCategory(chart: ChartDocument, index: number): ChartDocume
   return {
     ...chart, textStyles, scaleExtent: null,
     hiddenCategoryLabels: chart.hiddenCategoryLabels?.filter(i => i !== index).map(i => i > index ? i - 1 : i),
+    pieColors: chart.pieColors?.filter((_, i) => i !== index),
+    pictographSymbols: chart.pictographSymbols?.filter((_, i) => i !== index),
     categories: chart.categories.filter((_, i) => i !== index),
     series: chart.series.map(item => ({ ...item, values: item.values.filter((_, i) => i !== index) })),
   };
@@ -209,7 +277,27 @@ export function removeCategory(chart: ChartDocument, index: number): ChartDocume
 
 export function removeSeries(chart: ChartDocument, index: number): ChartDocument {
   if (chart.series.length <= 1 || !chart.series[index]) return chart;
-  return { ...chart, scaleExtent: null, series: chart.series.filter((_, i) => i !== index) };
+  const updateIndex = (selected?: number) => selected === undefined ? undefined
+    : clamp(selected - Number(index < selected), 0, chart.series.length - 2);
+  return { ...chart, pieSeries: updateIndex(chart.pieSeries), barSeries: updateIndex(chart.barSeries),
+    pictographSeries: updateIndex(chart.pictographSeries),
+    scaleExtent: null, series: chart.series.filter((_, i) => i !== index) };
+}
+
+export function displayedSeriesField(chart: ChartDocument) {
+  if (chart.kind === 'pie') return 'pieSeries' as const;
+  if (chart.kind === 'pictograph') return 'pictographSeries' as const;
+  if (chart.kind === 'bar' && !chart.groupedColumns) return 'barSeries' as const;
+  return null;
+}
+
+export function hasChartAxes(kind?: ChartKind) {
+  return kind !== 'pie' && kind !== 'pictograph';
+}
+
+export function displayedSeries(chart: ChartDocument) {
+  const field = displayedSeriesField(chart);
+  return field ? [chart.series[chart[field] ?? 0]] : chart.series;
 }
 
 export function statistics(values: (number | null)[]): Record<Statistic, number> | null {
@@ -240,6 +328,27 @@ export function getTextStyle(chart: ChartDocument, target: TextTarget): TextStyl
     alignment: 'start',
     ...chart.textStyles?.[target],
   };
+}
+
+export function exerciseNoteLayout(chart: ChartDocument, note: TextNote) {
+  const { size, alignment } = getTextStyle(chart, note.id);
+  const x = note.position.x;
+  const space = alignment === 'start' ? WIDTH - 8 - x : alignment === 'end' ? x - 8 : 2 * Math.min(x - 8, WIDTH - 8 - x);
+  const charactersPerLine = Math.max(1, Math.floor(space / size));
+  const letters = Array.from(note.text);
+  const lines: string[] = [];
+  for (let index = 0; index < letters.length; index += charactersPerLine) {
+    lines.push(letters.slice(index, index + charactersPerLine).join(''));
+  }
+  return { x, y: Math.max(HEIGHT + size + 12, EXERCISE_POSITION.y), lines, lineHeight: Math.ceil(size * 1.3) };
+}
+
+export function chartSheetHeight(chart: ChartDocument) {
+  return chart.notes.reduce((height, note) => {
+    if (!note.exerciseQuestion) return height;
+    const { y, lines, lineHeight } = exerciseNoteLayout(chart, note);
+    return Math.max(height, y + lineHeight * Math.max(0, lines.length - 1) + Math.max(20, lineHeight / 2));
+  }, HEIGHT);
 }
 
 export function getSeriesStyle(series: Series, chartStyle: ChartStyle): SeriesStyle {
@@ -418,11 +527,43 @@ export function categoryX(index: number, count: number, plot: Plot) {
   return plot.left + (plot.right - plot.left) * (index + 0.5) / count;
 }
 
-export function visibleMark(mark: Mark, plot: Plot, scale: ReturnType<typeof getScale>): Mark | null {
+export function visibleMark(mark: Mark, plot: Plot, scale: ReturnType<typeof getScale>, kind?: ChartKind): Mark | null {
   if (mark.referenceValue === undefined) return mark;
-  if (!scale.includes(mark.referenceValue)) return null;
+  if (!hasChartAxes(kind) || !scale.includes(mark.referenceValue)) return null;
   const y = scale.y(mark.referenceValue);
   return { ...mark, points: [{ x: plot.left, y }, { x: plot.right, y }] };
+}
+
+export function pieStyle(style: ChartStyle): PieStyle {
+  return { ...DEFAULT_PIE_STYLE, ...style.pie };
+}
+
+export function pieColor(chart: ChartDocument, index: number) {
+  const palette = PIE_PALETTES[chart.style.pie?.palette ?? DEFAULT_PIE_STYLE.palette];
+  return chart.pieColors?.[index] ?? palette[index % palette.length];
+}
+
+export function pieSlices(values: (number | null)[], order: PieStyle['order'] = 'data') {
+  const maximum = values.reduce((max, value) => Math.max(max, value ?? 0), 0);
+  if (!maximum) return [];
+  const sectors = values.flatMap((value, index) => value > 0 ? [{ index, value, weight: value / maximum }] : []);
+  const total = sectors.reduce((sum, sector) => sum + sector.weight, 0);
+  if (order !== 'data') sectors.sort((a, b) => order === 'desc' ? b.value - a.value : a.value - b.value);
+  const turn = Math.PI * 2;
+  let cumulative = 0;
+  return sectors.map(({ index, value, weight }) => {
+    const start = cumulative / total * turn;
+    cumulative += weight;
+    const end = cumulative / total * turn;
+    return { index, start, end, share: weight / total, value };
+  });
+}
+
+const percentFormatters = [0, 1, 2].map(maximumFractionDigits => new Intl.NumberFormat('zh-CN', { style: 'percent', maximumFractionDigits }));
+
+export function formatShare(share: number, digits = 1) {
+  const threshold = 10 ** -digits;
+  return share < threshold / 100 ? `<${threshold}%` : percentFormatters[digits].format(share);
 }
 
 export function markPath(points: Point[]) {

@@ -47,12 +47,13 @@ export function boardReducer(workspace: Workspace, action: Action): Workspace {
   if (action.type === 'load') return action.workspace;
   if (action.type === 'clear') {
     const current = workspace.boards.find(board => board.id === workspace.activeId);
-    return singleBoardWorkspace(blankChart(current.chart.kind));
+    return singleBoardWorkspace(blankChart(current.chart.kind, current.chart.groupedColumns));
   }
   if (action.type === 'add' || action.type === 'duplicate') {
     const current = workspace.boards.find(board => board.id === workspace.activeId);
     const id = workspace.nextId;
-    const chart = action.type === 'duplicate' ? structuredClone(current.chart) : action.chart ?? blankChart(current.chart.kind);
+    const chart = action.type === 'duplicate' ? structuredClone(current.chart)
+      : action.chart ?? blankChart(current.chart.kind, current.chart.groupedColumns);
     return { ...workspace, boards: [...workspace.boards, newBoard(id, chart)], activeId: id, nextId: id + 1 };
   }
   if (action.type === 'delete') {
@@ -60,7 +61,7 @@ export function boardReducer(workspace: Workspace, action: Action): Workspace {
     if (index < 0) return workspace;
     const board = workspace.boards[index];
     const boards = workspace.boards.filter(item => item.id !== board.id);
-    const replacement = boards.length === 0 ? newBoard(workspace.nextId, blankChart(board.chart.kind)) : undefined;
+    const replacement = boards.length === 0 ? newBoard(workspace.nextId, blankChart(board.chart.kind, board.chart.groupedColumns)) : undefined;
     if (replacement) boards.push(replacement);
     const activeId = workspace.activeId === board.id ? boards[Math.min(index, boards.length - 1)].id : workspace.activeId;
     return {

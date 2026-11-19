@@ -1,4 +1,6 @@
-export type ChartKind = 'line' | 'bar';
+import type { PictographSymbol } from './pictographSymbols';
+
+export type ChartKind = 'line' | 'bar' | 'pie' | 'pictograph';
 export type Tool = 'line' | 'pen' | 'eraser' | 'select' | 'text';
 export type LineKind = 'solid' | 'dashed' | 'arrow';
 export type ArrowPlacement = 'start' | 'end' | 'both';
@@ -15,6 +17,8 @@ export type Selection =
   | { kind: 'mark'; index: number }
   | { kind: 'text'; target: TextTarget }
   | { kind: 'data'; datum: Datum }
+  | { kind: 'pie-legend' }
+  | { kind: 'pictograph-legend' }
   | { kind: 'axis'; axis: Axis | 'both' };
 export type TextFont = 'system' | 'sans' | 'serif' | 'kai' | 'mono';
 export type TickMode = 'auto' | 'all' | 'interval';
@@ -39,6 +43,8 @@ export interface TextNote {
   id: NoteTarget;
   text: string;
   position: Point;
+  pieAttached?: boolean;
+  exerciseQuestion?: boolean;
 }
 
 export interface Mark {
@@ -97,7 +103,59 @@ export interface ChartStyle {
   strokeWidth: number;
   axes: Record<Axis, AxisStyle>;
   axisArrowhead?: AxisArrowhead;
+  groupWidth?: number;
+  pie?: Partial<PieStyle>;
+  pictograph?: Partial<PictographStyle>;
   legend: boolean | 'auto';
+}
+
+export interface PictographStyle {
+  symbol: PictographSymbol;
+  symbolMode: 'shared' | 'category';
+  colorMode: 'single' | 'color';
+  outline: boolean;
+  frame: boolean;
+  direction: 'horizontal' | 'vertical';
+  unit?: number;
+  unitLabel?: string;
+  symbolSize: number;
+  symbolGap: number;
+  guides: boolean;
+  frameColor?: string;
+  showKey: boolean;
+  legendText?: string;
+  legendAlignment: 'auto' | 'start' | 'center' | 'end';
+  legendFont: TextFont;
+  legendFontSize: number;
+  legendColor: string;
+  legendBold: boolean;
+  legendIcon: 'auto' | 'show' | 'hide';
+}
+
+export interface PieStyle {
+  radius: number;
+  startAngle: number;
+  separatorWidth: number;
+  labelMode: 'percent' | 'value' | 'both';
+  percentageDigits: number;
+  legendSide: 'left' | 'right';
+  holeRatio: number;
+  palette: 'classic' | 'pastel' | 'ocean' | 'monochrome';
+  order: 'data' | 'desc' | 'asc';
+  clockwise: boolean;
+  separatorColor: string;
+  labelFont: TextFont;
+  labelFontSize: number;
+  labelColor?: string;
+  labelPlacement: 'middle' | 'rim';
+  legendFont: TextFont;
+  legendFontSize: number;
+  legendColor: string;
+  legendRowGap: number;
+  legendMarker: 'square' | 'circle' | 'line';
+  legendMarkerSize: number;
+  legendMarkerGap: number;
+  legendContent: 'follow' | 'category' | 'percent' | 'value' | 'both';
 }
 
 export interface ChartDocument {
@@ -107,6 +165,16 @@ export interface ChartDocument {
   yLabel: string;
   categories: string[];
   hiddenCategoryLabels?: number[];
+  groupedColumns?: boolean;
+  barSeries?: number;
+  pieSeries?: number;
+  pictographSeries?: number;
+  pictographSymbols?: (PictographSymbol | null)[];
+  pictographLegendPosition?: Point;
+  pieColors?: (string | null)[];
+  piePosition?: Point;
+  pieLegendPosition?: Point;
+  pieLegendOffset?: Point;
   series: Series[];
   marks: Mark[];
   notes: TextNote[];

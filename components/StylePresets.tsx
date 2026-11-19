@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
-import { AXIS_LENGTHS, DEFAULT_AXIS_ARROWHEAD, DEFAULT_STYLE, clamp, isAxisArrowhead, isAxisBreak } from '../chart';
+import { AXIS_LENGTHS, DEFAULT_AXIS_ARROWHEAD, DEFAULT_STYLE, clamp, isAxisArrowhead, isAxisBreak, isGroupWidth, isPieStyle } from '../chart';
 import { download } from '../downloads';
+import { isPictographStyle } from '../pictograph';
 import type { Axis, AxisStyle, ChartStyle } from '../types';
 
 interface Preset {
@@ -41,6 +42,9 @@ function applyPreset(config: Preset['config']): ChartStyle {
     strokeWidth: size('strokeWidth', 10),
     axes: { x: presetAxis('x', config), y: presetAxis('y', config) },
     axisArrowhead: isAxisArrowhead(config.axisArrowhead) ? config.axisArrowhead : DEFAULT_AXIS_ARROWHEAD,
+    groupWidth: isGroupWidth(config.groupWidth) ? config.groupWidth : undefined,
+    pie: isPieStyle(config.pie) ? config.pie : undefined,
+    pictograph: isPictographStyle(config.pictograph) ? config.pictograph : undefined,
     legend: typeof config.legend === 'boolean' ? config.legend : DEFAULT_STYLE.legend,
   };
 }

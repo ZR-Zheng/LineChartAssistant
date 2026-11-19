@@ -1,12 +1,15 @@
 import { initialWorkspace } from './boards';
 import type { Board, Workspace } from './boards';
-import { AXIS_LENGTHS, isAxisArrowhead, isAxisBreak, TEXT_FONTS } from './chart';
+import { AXIS_LENGTHS, EXERCISE_POSITION, isAxisArrowhead, isAxisBreak, isGroupWidth, isPieStyle, TEXT_FONTS } from './chart';
+import { isPictographStyle } from './pictograph';
+import { isPictographSymbol } from './pictographSymbols';
 import type { ChartDocument } from './types';
 
 const STORAGE_KEY = 'lineChartWorkspace';
 const VERSION = 1;
 
-type SavedBoard = Pick<Board, 'id' | 'chart' | 'zoom'>;
+type SavedChart = Omit<ChartDocument, 'kind'> & { kind: ChartDocument['kind'] | 'grouped' | 'horizontal' };
+type SavedBoard = Pick<Board, 'id' | 'zoom'> & { chart: SavedChart };
 type SavedWorkspace = {
   version: number;
   boards: SavedBoard[];
@@ -39,12 +42,18 @@ function axisStyle(axis: 'x' | 'y', value: unknown): boolean {
     && oneOf(value.titlePlacement, 'end', 'center', 'start');
 }
 
-function validChart(value: unknown): value is ChartDocument {
-  if (!object(value) || !oneOf(value.kind, 'line', 'bar') || !text(value.title) || !text(value.xLabel) || !text(value.yLabel)) return false;
-  const { categories, series, style, marks, notes, textStyles, plotOffset, labelPositions, scaleExtent, hiddenCategoryLabels } = value;
+function validChart(value: unknown): value is SavedChart {
+  if (!object(value) || !oneOf(value.kind, 'line', 'bar', 'grouped', 'horizontal', 'pie', 'pictograph') || !text(value.title) || !text(value.xLabel) || !text(value.yLabel)) return false;
+  const { categories, series, style, marks, notes, textStyles, plotOffset, labelPositions, scaleExtent, hiddenCategoryLabels,
+    groupedColumns, barSeries, pieColors, pieSeries, piePosition, pieLegendPosition, pieLegendOffset,
+    pictographSeries, pictographSymbols, pictographLegendPosition } = value;
   return Array.isArray(categories) && categories.length > 0 && categories.every(text)
     && (hiddenCategoryLabels === undefined || Array.isArray(hiddenCategoryLabels)
       && hiddenCategoryLabels.every(index => Number.isSafeInteger(index) && index >= 0 && index < categories.length))
+    && (pieColors === undefined || Array.isArray(pieColors) && pieColors.length <= categories.length
+      && pieColors.every(item => item === null || color(item)))
+    && (pictographSymbols === undefined || Array.isArray(pictographSymbols) && pictographSymbols.length <= categories.length
+      && pictographSymbols.every(item => item === null || isPictographSymbol(item)))
     && Array.isArray(series) && series.length > 0 && series.every(item => object(item) && text(item.name) && color(item.color)
       && Array.isArray(item.values) && item.values.length === categories.length && item.values.every(v => v === null || number(v))
       && (item.style === undefined || object(item.style)
@@ -52,16 +61,27 @@ function validChart(value: unknown): value is ChartDocument {
         && ['dots', 'showLabels', 'roundedColumns'].every(key => item.style[key] === undefined || bool(item.style[key]))
         && oneOf(item.style.dotShape, undefined, 'circle', 'square', 'diamond')
         && oneOf(item.style.dotFill, undefined, 'hollow', 'solid')))
+    && [pieSeries, barSeries, pictographSeries].every(index => index === undefined
+      || number(index) && Number.isSafeInteger(index) && index >= 0 && index < series.length)
+    && (groupedColumns === undefined || bool(groupedColumns))
+    && (piePosition === undefined || point(piePosition))
+    && (pieLegendPosition === undefined || point(pieLegendPosition))
+    && (pieLegendOffset === undefined || point(pieLegendOffset))
+    && (pictographLegendPosition === undefined || point(pictographLegendPosition))
     && object(style) && bool(style.grid) && bool(style.dots) && bool(style.showLabels) && bool(style.showOrigin)
     && oneOf(style.legend, true, false, 'auto') && (style.showTitle === undefined || bool(style.showTitle))
     && (style.axisArrowhead === undefined || isAxisArrowhead(style.axisArrowhead))
+    && (style.groupWidth === undefined || isGroupWidth(style.groupWidth)) && (style.pie === undefined || isPieStyle(style.pie))
+    && (style.pictograph === undefined || isPictographStyle(style.pictograph))
     && positive(style.strokeWidth) && positive(style.dotSize) && object(style.axes) && axisStyle('x', style.axes.x) && axisStyle('y', style.axes.y)
     && Array.isArray(marks) && marks.every(mark => object(mark) && oneOf(mark.type, 'line', 'pen') && color(mark.color)
       && Array.isArray(mark.points) && mark.points.length >= (mark.type === 'line' ? 2 : 1) && mark.points.every(point)
       && (mark.width === undefined || positive(mark.width)) && (mark.opacity === undefined || number(mark.opacity))
       && (mark.referenceValue === undefined || number(mark.referenceValue))
       && oneOf(mark.lineKind, undefined, 'solid', 'dashed', 'arrow') && oneOf(mark.arrows, undefined, 'start', 'end', 'both'))
-    && Array.isArray(notes) && notes.every(note => object(note) && text(note.id) && /^note:\d+$/.test(note.id) && text(note.text) && point(note.position))
+    && Array.isArray(notes) && notes.every(note => object(note) && text(note.id) && /^note:\d+$/.test(note.id) && text(note.text) && point(note.position)
+      && (note.pieAttached === undefined || bool(note.pieAttached))
+      && (note.exerciseQuestion === undefined || bool(note.exerciseQuestion)))
     && point(plotOffset) && object(labelPositions) && Object.values(labelPositions).every(point)
     && object(textStyles) && Object.values(textStyles).every(item => object(item)
       && (item.font === undefined || text(item.font) && Object.hasOwn(TEXT_FONTS, item.font))
@@ -96,7 +116,16 @@ export function parseWorkspace(source: string): Workspace {
     throw new Error('项目文件格式有误。');
   }
   const snapshot = data as SavedWorkspace;
-  const withHistory = (board: SavedBoard): Board => ({ ...board, past: [], future: [] });
+  const withHistory = (board: SavedBoard): Board => {
+    const { kind, ...chart } = board.chart;
+    const legacyGrouped = kind === 'horizontal' || kind === 'grouped';
+    const normalizedKind = legacyGrouped ? 'bar' : kind;
+    const groupedColumns = legacyGrouped ? true : chart.groupedColumns ?? (kind === 'bar' ? chart.series.length > 1 : undefined);
+    const notes = chart.notes.map(note => note.exerciseQuestion === undefined && !note.pieAttached
+      && note.id === 'note:1' && note.text.startsWith('问题：') && note.position.x === EXERCISE_POSITION.x && [513, 534].includes(note.position.y)
+      ? { ...note, position: EXERCISE_POSITION, exerciseQuestion: true } : note);
+    return { ...board, chart: { ...chart, kind: normalizedKind, groupedColumns, notes }, past: [], future: [] };
+  };
   const boards = snapshot.boards.map(withHistory);
   const removed = snapshot.deleted.map(entry => withHistory(entry.board));
   const lookup = new Map([...boards, ...removed].map(board => [board.id, board]));

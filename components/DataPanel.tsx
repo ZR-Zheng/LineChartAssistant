@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import type { ChangeEvent, ClipboardEvent, FormEvent } from 'react';
 import { ClipboardPaste, Download, Eye, Plus, Scaling, Trash2, Upload, X } from 'lucide-react';
-import { parseValue, removeCategory, SERIES_COLORS, setCategoryLabelVisible, setChartValue } from '../chart';
+import { displayedSeriesField, parseValue, removeCategory, SERIES_COLORS, setCategoryLabelVisible, setChartValue } from '../chart';
 import { chartFileName, download } from '../downloads';
 import { exportTable, importTable, parseTableBlock, pasteTableBlock, replaceTable } from '../tabular';
 import type { ChartDocument, ChartEdit } from '../types';
@@ -71,14 +71,16 @@ function DataPanel({ chart, onEdit, activeSeries, onSelectSeries, onReplaceCateg
 
   function addSeries() {
     const index = series.length;
-    onEdit(current => ({
-      ...current,
-      series: [...current.series, {
-        name: `数据 ${index + 1}`,
-        color: SERIES_COLORS[index % SERIES_COLORS.length],
-        values: current.categories.map(() => null),
-      }],
-    }));
+    onEdit(current => {
+      const field = displayedSeriesField(current);
+      return { ...current,
+        ...(field && { [field]: current.series.length }),
+        ...(field === 'barSeries' && { scaleExtent: null }),
+        series: [...current.series, {
+          name: `数据 ${index + 1}`, color: SERIES_COLORS[index % SERIES_COLORS.length], values: current.categories.map(() => null),
+        }],
+      };
+    });
     onSelectSeries(index);
   }
 
@@ -110,6 +112,9 @@ function DataPanel({ chart, onEdit, activeSeries, onSelectSeries, onReplaceCateg
         <button className="icon-button" title="关闭数据面板" aria-label="关闭数据面板" onClick={onClose}><X size={18} /></button>
       </div>
       <div className="panel-content">
+        {chart.kind === 'bar' && chart.groupedColumns && <p className="data-entry-hint" role="status">
+          请在同一行输入同一类别的两组数据。需要对比更多组时，可添加系列。
+        </p>}
         <div className="panel-actions">
           <button className="button compact" aria-expanded={importing} onClick={() => { setImporting(!importing); setError(''); }}>
             <ClipboardPaste size={16} /> 粘贴表格

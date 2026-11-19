@@ -10,6 +10,11 @@ export default defineConfig(({ mode }) => {
         host: '0.0.0.0',
       },
       plugins: [react()],
+      build: {
+        rollupOptions: {
+          output: { manualChunks: { 'pictograph-icons': ['./assets/fluent-pictographs.json'] } },
+        },
+      },
       resolve: {
         alias: {
           '@': path.resolve(__dirname, '.'),

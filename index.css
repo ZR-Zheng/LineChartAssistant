@@ -123,6 +123,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   flex-wrap: wrap;
 }
 .toolbar-start, .toolbar-end { gap: 8px; }
+.data-entry-hint { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.chart-kind-select { display: inline-flex; align-items: center; gap: 6px; padding: 4px 7px; border: 1px solid var(--border);
+  border-radius: 9px; color: var(--accent-dark); background: #eef1f8; }
+.chart-kind-select select { min-height: 32px; border: 0; color: inherit; background: transparent; font-weight: 600; cursor: pointer; }
 .random-chart-controls { display: flex; align-items: center; gap: 4px; }
 .random-chart-controls select { height: 34px; padding: 0 5px; color: var(--muted); font: inherit; font-size: 13px;
   border: 1px solid var(--border); border-radius: 7px; background: #fff; }
@@ -260,6 +264,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .chart-sheet { display: block; width: 100%; height: auto; user-select: none; touch-action: none; }
 .tool-line, .tool-pen, .tool-eraser { cursor: crosshair; }
 .tool-select .chart-datum { cursor: ns-resize; }
+.tool-select[data-chart-kind="pie"] .chart-datum, .tool-select [data-pie-move] { cursor: grab; }
+.tool-select[data-chart-kind="pictograph"] .chart-datum { cursor: pointer; }
+.tool-select [data-pie-legend], .tool-select [data-pictograph-legend] { cursor: move; }
 .tool-text { cursor: text; }
 .tool-eraser .chart-datum, .tool-eraser [data-mark] { cursor: cell; }
 .canvas-text { cursor: text; }
@@ -389,6 +396,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .axis-settings { display: grid; gap: 10px; }
 .axis-settings label { display: grid; gap: 6px; color: var(--muted); font-size: 13px; }
 .axis-settings small { font-size: 12px; line-height: 1.45; }
+.pie-tabs { width: 100%; }
+.pie-color-setting { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .axis-settings input:not([type="range"], [type="checkbox"]), .axis-settings select {
   width: 100%; min-width: 0; min-height: 34px; padding: 4px 7px; border: 1px solid var(--border);
   border-radius: 7px; background: #fff; color: #202a43;
@@ -396,6 +405,22 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .axis-row { display: flex; gap: 8px; }
 .axis-row > label { flex: 1; min-width: 0; }
 .axis-row > .axis-color { flex: 0 0 43px; }
+.pictograph-symbol-field { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.axis-settings .pictograph-symbol-field { display: grid; justify-items: start; color: var(--muted); font-size: 13px; }
+.pictograph-symbol-trigger { gap: 5px; }
+.pictograph-symbol-popover { position: fixed; inset: auto; margin: 0; width: min(318px, calc(100vw - 16px));
+  max-height: calc(100dvh - 16px); overflow: auto; padding: 10px; border: 1px solid var(--border); border-radius: 12px;
+  background: white; color: #202a43; box-shadow: 0 12px 32px #1f2b422a; }
+.pictograph-symbol-popover:popover-open { display: grid; gap: 9px; }
+.pictograph-symbol-popover .segmented { justify-self: start; }
+.pictograph-symbol-search, #pictograph-panel textarea { width: 100%; min-height: 36px; padding: 7px 9px;
+  border: 1px solid var(--border); border-radius: 7px; background: #fff; color: #202a43; font: inherit; }
+#pictograph-panel textarea { min-height: 76px; resize: vertical; }
+.pictograph-symbol-groups { display: flex; flex-wrap: wrap; gap: 4px; }
+.pictograph-symbol-groups .button { padding-inline: 8px; }
+.pictograph-symbol-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 5px; }
+.pictograph-symbol-grid button { width: 100%; min-width: 0; height: 42px; padding: 3px; }
+.pictograph-symbol-popover .button[aria-pressed="true"] { background: var(--accent-soft); border-color: #c4cff9; color: var(--accent-dark); }
 .axis-color { display: grid; gap: 6px; align-content: start; }
 .axis-color .color-picker summary { width: 43px; }
 .axis-range-row .axis-length + label { flex: 0 0 94px; }

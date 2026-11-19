@@ -1,26 +1,32 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import type { ChangeEvent, CSSProperties } from 'react';
 import {
-  ChartColumn, ChartNoAxesCombined, ChevronDown, Dices, Download, Eraser, Grid2X2, Info, Magnet, Minus,
-  List, MousePointer2, MoveRight, MoveUpRight, PanelTop, Pencil, Plus, Redo2, SlidersHorizontal, Table2, Tags, Trash2, Type, Undo2,
+  ChartColumn, ChartNoAxesCombined, ChartPie, ChevronDown, Dices, Download, Eraser, Grid2X2, Info, Magnet, Minus,
+  List, MousePointer2, MoveRight, MoveUpRight, PanelTop, Pencil, Plus, Redo2, RotateCcw, Shapes, SlidersHorizontal, Table2, Tags, Trash2, Type, Undo2, X,
 } from 'lucide-react';
 import AxisPanel from './components/AxisPanel';
 import BoardSidebar from './components/BoardSidebar';
 import ChartDisplay from './components/ChartDisplay';
 import ColorPicker from './components/ColorPicker';
 import DataPanel from './components/DataPanel';
-import { AxisSelectionToolbar, DataSelectionToolbar } from './components/SelectionToolbar';
+import PieSettings from './components/PieSettings';
+import type { PieSettingsTab } from './components/PieSettings';
+import PictographSettings from './components/PictographSettings';
+import type { PictographSettingsTab } from './components/PictographSettings';
+import { AxisSelectionToolbar, DataSelectionToolbar, GroupWidthField } from './components/SelectionToolbar';
 import TextToolbar from './components/TextToolbar';
 import ToolbarStrip from './components/ToolbarStrip';
 import { boardReducer } from './boards';
-import { formatValue, getPlot, getScale, getSeriesStyle, getTextStyle, hideText, isNote, MAX_MANUAL_TICKS, removeCategory, removeSeries, setChartValue,
-  STATISTIC_LABELS, statistics, visibleMark } from './chart';
+import { displayedSeries, displayedSeriesField, formatValue, getPlot, getScale, getSeriesStyle, getTextStyle, hasChartAxes, hideText, isNote, MAX_MANUAL_TICKS,
+  removeCategory, removeSeries, SERIES_COLORS, setChartValue, STATISTIC_LABELS, statistics, visibleMark } from './chart';
 import { download, exportChartImage, exportChartSvg } from './downloads';
 import { NO_TARGETS, translateLine } from './alignment';
 import { EXERCISE_TOPICS, EXERCISE_TYPES, exerciseTypes, randomChart } from './randomChart';
 import type { ExerciseTopic, ExerciseType } from './randomChart';
+import { movePie, resetPieLegend, togglePieLegendAttachment } from './pieLayout';
+import { resetPictographLegend } from './pictograph';
 import { loadWorkspace, parseWorkspace, saveWorkspace, serializeWorkspace } from './workspaceStorage';
-import type { ArrowPlacement, Axis, ChartEdit, EraseScope, LineKind, Mark, Selection, Statistic, TextStyle, TitlePlacement, Tool } from './types';
+import type { ArrowPlacement, Axis, ChartEdit, ChartKind, EraseScope, LineKind, Mark, Selection, Statistic, TextStyle, TitlePlacement, Tool } from './types';
 
 const TOOLS = [
   { id: 'select', key: '1', label: '选择', icon: MousePointer2, hint: '点击绘图区添加数据点，拖动数据点调整数值。拖动轴线或原点可移动坐标系。' },
@@ -33,6 +39,10 @@ const LINE_KINDS = [
   { id: 'solid', label: '实线' }, { id: 'dashed', label: '虚线' }, { id: 'arrow', label: '箭头线' },
 ] as const;
 const STATISTICS = ['max', 'min', 'mean'] as const;
+const CHART_KINDS = {
+  line: { label: '折线图', icon: ChartNoAxesCombined }, bar: { label: '柱状图', icon: ChartColumn },
+  pie: { label: '扇形图', icon: ChartPie }, pictograph: { label: '象形图', icon: Shapes },
+} as const;
 const ERASER_OPTIONS = [
   { id: 'all', label: '全部' }, { id: 'marks', label: '仅标注' }, { id: 'data', label: '仅数据点' },
 ] as const;
@@ -56,8 +66,10 @@ function App() {
   const [toolbar, setToolbar] = useState(() => {
     try { return localStorage.getItem(TOOLBAR_PREFERENCE) !== 'false'; } catch { return true; }
   });
-  const [panel, setPanel] = useState<'data' | 'axes' | null>(null);
+  const [panel, setPanel] = useState<'data' | 'axes' | 'pie' | 'pictograph' | null>(null);
   const [axisTab, setAxisTab] = useState<Axis>('x');
+  const [pieTab, setPieTab] = useState<PieSettingsTab>('shape');
+  const [pictographTab, setPictographTab] = useState<PictographSettingsTab>('shape');
   const [selectedSeries, setSelectedSeries] = useState(0);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState('');
@@ -65,17 +77,33 @@ function App() {
   const [topic, setTopic] = useState<ExerciseTopic>('all');
   const [exercise, setExercise] = useState<ExerciseType>('chart');
   const projectFile = useRef<HTMLInputElement>(null);
+  const pictographLegendInput = useRef<HTMLTextAreaElement>(null);
   const svg = useRef<SVGSVGElement>(null);
   const desk = useRef<HTMLDivElement>(null);
 
-  const activeSeries = Math.min(selectedSeries, chart.series.length - 1);
-  const availableExercises = exerciseTypes(chart.kind);
+  const pie = chart.kind === 'pie';
+  const pictograph = chart.kind === 'pictograph';
+  const hasAxes = hasChartAxes(chart.kind);
+  const grouped = chart.kind === 'bar' && !!chart.groupedColumns;
+  const seriesField = displayedSeriesField(chart);
+  const visibleSeries = displayedSeries(chart);
+  const activeSeries = seriesField ? chart[seriesField] ?? 0 : Math.min(selectedSeries, chart.series.length - 1);
+  const settingsPanel = pie ? 'pie' : pictograph ? 'pictograph' : 'axes';
+  const settingsId = pie ? 'pie-panel' : pictograph ? 'pictograph-panel' : 'axis-panel';
+  const openPanel = panel === 'data' || panel === settingsPanel ? panel : null;
+  const ChartIcon = CHART_KINDS[chart.kind].icon;
+  const availableExercises = exerciseTypes(chart.kind, grouped);
   const currentExercise = availableExercises.includes(exercise) ? exercise : 'chart';
   const values = chart.series[activeSeries].values;
   const stats = useMemo(() => statistics(values), [values]);
   const onEdit: ChartEdit = update => dispatch({ type: 'edit', id, update });
   const { hint } = TOOLS.find(item => item.id === tool);
-  const pointCount = chart.series.reduce((sum, item) => sum + item.values.filter(value => value !== null).length, 0);
+  const pieHint = tool === 'select' ? '拖动扇形可移动图形和吸附的图注。点击扇区可改数值和颜色。' : tool === 'line' ? '拖动绘制标注线。' : hint;
+  const pictographHint = tool === 'select' ? '点击一行或一列可编辑图符和数值，也可直接拖动图例。' : tool === 'line' ? '拖动绘制标注线。' : hint;
+  const chartHint = pie ? pieHint : pictograph ? pictographHint
+    : grouped && tool === 'select' ? '选择要编辑的系列，点击绘图区添加柱形，或上下拖动柱形调整数值。' : hint;
+  const pointCount = pie ? values.filter(value => value > 0).length
+    : visibleSeries.reduce((sum, item) => sum + item.values.filter(value => value !== null).length, 0);
   const markIndex = selection?.kind === 'mark' ? selection.index : undefined;
   const mark = markIndex === undefined ? undefined : chart.marks[markIndex];
   const text = selection?.kind === 'text' ? selection.target : null;
@@ -92,21 +120,26 @@ function App() {
   const currentOpacity = mark?.opacity ?? (mark ? 1 : inkOpacity);
   const currentArrows = mark?.arrows ?? (mark ? 'end' : inkArrows);
   const currentLineKind = mark ? mark.lineKind ?? 'solid' : lineKind;
-  const showDataLabels = chart.series.some(series => getSeriesStyle(series, chart.style).showLabels);
-  const showLegend = chart.style.legend === true || chart.style.legend === 'auto' && chart.series.length > 1;
+  const showDataLabels = visibleSeries.some(series => getSeriesStyle(series, chart.style).showLabels);
+  const showLegend = pictograph ? chart.style.pictograph?.showKey !== false
+    : chart.style.legend === true || chart.style.legend === 'auto' && (pie || visibleSeries.length > 1);
+  const legendSelected = showLegend && (pie && selection?.kind === 'pie-legend'
+    || pictograph && selection?.kind === 'pictograph-legend');
   const yAxis = chart.style.axes.y;
   const limit = yAxis.maximum ?? Infinity;
   const needScale = yAxis.tickMode !== 'auto' || tool === 'line' || mark?.referenceValue !== undefined || yAxis.omitted;
   const plot = getPlot(chart.style, chart.plotOffset);
-  const scale = needScale ? getScale(chart.series, chart.scaleExtent, plot, yAxis) : null;
-  const clipped = Number.isFinite(limit) ? chart.series.reduce((sum, item) =>
+  const scale = hasAxes && needScale ? getScale(visibleSeries, chart.scaleExtent, plot, yAxis) : null;
+  const clipped = hasAxes && Number.isFinite(limit) ? visibleSeries.reduce((sum, item) =>
     sum + item.values.filter(value => value !== null && value > limit).length, 0) : 0;
-  const omitted = scale?.omission ? chart.series.reduce((sum, item) =>
+  const omitted = scale?.omission ? visibleSeries.reduce((sum, item) =>
     sum + item.values.filter(value => value !== null && scale.inBreak(value)).length, 0) : 0;
+  const negative = pie ? values.filter(value => value < 0).length : 0;
   const notice = [
     scale?.tooManyTicks ? `纵轴超过 ${MAX_MANUAL_TICKS} 个刻度，暂用自动刻度。` : '',
     clipped ? `${clipped} 个数据值超出纵轴最大值，超出部分已裁切。` : '',
     omitted ? `${omitted} 个数据值位于断轴省略区间，可在数据表中查看。` : '',
+    negative ? `${negative} 个负值已省略，占比按正数计算。` : '',
   ].filter(Boolean).join(' ');
 
   useEffect(() => {
@@ -143,6 +176,36 @@ function App() {
     setTool(next);
   }
 
+  function changeKind(kind: ChartKind) {
+    if (kind === chart.kind) return;
+    choose(null);
+    if (!hasChartAxes(kind) && chart.series.every(series => !series.values.some(value => value > 0))) {
+      setPanel('data');
+    } else if (panel !== 'data') setPanel(null);
+    onEdit(current => ({ ...current, kind, scaleExtent: null,
+      ...(kind === 'bar' && { groupedColumns: current.groupedColumns ?? false }) }));
+  }
+
+  function toggleGroupedColumns() {
+    const enabled = !grouped;
+    choose(null);
+    setSelectedSeries(activeSeries);
+    if (enabled) setPanel('data');
+    onEdit(current => ({ ...current, groupedColumns: enabled, barSeries: activeSeries, scaleExtent: null,
+      series: enabled && current.series.length === 1 ? [...current.series, {
+        name: '数据 2', color: SERIES_COLORS.find(color => color !== current.series[0].color),
+        values: current.categories.map(() => null),
+      }] : current.series }));
+  }
+
+  function selectSeries(index: number) {
+    setSelectedSeries(index);
+    if (!seriesField) return;
+    if (index !== activeSeries) choose(null);
+    onEdit(current => !current.series[index] || (current[seriesField] ?? 0) === index ? current
+      : { ...current, [seriesField]: index, scaleExtent: seriesField === 'barSeries' ? null : current.scaleExtent });
+  }
+
   function resetBoardControls() {
     changeTool('select');
     setSelectedSeries(0);
@@ -155,7 +218,7 @@ function App() {
     if (id === action) return;
     resetBoardControls();
     if (typeof action === 'number') dispatch({ type: 'select', id: action });
-    else if (action === 'random') dispatch({ type: 'add', chart: randomChart(chart.kind, Math.random, topic, currentExercise) });
+    else if (action === 'random') dispatch({ type: 'add', chart: randomChart(chart.kind, Math.random, topic, currentExercise, grouped) });
     else dispatch({ type: action });
   }
 
@@ -219,6 +282,11 @@ function App() {
   }
 
   function toggleDataLabels() {
+    if (seriesField) {
+      onEdit(current => ({ ...current, series: current.series.map((series, i) => i === activeSeries
+        ? { ...series, style: { ...series.style, showLabels: !showDataLabels } } : series) }));
+      return;
+    }
     onEdit(current => ({
       ...current, style: { ...current.style, showLabels: !showDataLabels },
       series: current.series.map(series => {
@@ -227,6 +295,13 @@ function App() {
         return { ...series, style };
       }),
     }));
+  }
+
+  function toggleLegend() {
+    if (legendSelected) choose(null);
+    onEdit(current => ({ ...current, style: pictograph
+      ? { ...current.style, pictograph: { ...current.style.pictograph, showKey: !showLegend } }
+      : { ...current.style, legend: !showLegend } }));
   }
 
   function updateMark(changes: Partial<Mark>) {
@@ -244,6 +319,9 @@ function App() {
       onEdit(current => hideText(current, activeText));
     } else if (activeDatum) {
       onEdit(current => setChartValue(current, activeDatum.series, activeDatum.index, null));
+    } else if (legendSelected) {
+      toggleLegend();
+      return;
     } else if (axis) {
       onEdit(current => {
         const { x, y } = current.style.axes;
@@ -263,6 +341,12 @@ function App() {
     setAxisTab(axis);
     setPanel('axes');
     setTool('select');
+  }
+
+  function openPictographLegend() {
+    if (openPanel === 'pictograph' && pictographTab === 'legend') pictographLegendInput.current?.focus({ preventScroll: true });
+    setPictographTab('legend');
+    setPanel('pictograph');
   }
 
   function addStatistic(stat: Statistic) {
@@ -292,12 +376,12 @@ function App() {
       }
       const next = TOOLS.find(item => item.key === key);
       if (next) changeTool(next.id);
-      if (key === 'escape' && !document.querySelector('.datum-delete-menu:popover-open')) choose(null);
-      if ((key === 'delete' || key === 'backspace') && (mark || activeDatum || activeText !== null || axis)) {
+      if (key === 'escape' && !document.querySelector('.datum-delete-menu:popover-open, .pictograph-symbol-popover:popover-open')) choose(null);
+      if ((key === 'delete' || key === 'backspace') && (mark || activeDatum || activeText !== null || axis || legendSelected)) {
         event.preventDefault();
         removeSelection();
       }
-      const visible = mark && (mark.referenceValue === undefined ? mark : visibleMark(mark, plot, scale));
+      const visible = mark && (mark.referenceValue === undefined ? mark : visibleMark(mark, plot, scale, chart.kind));
       if (visible && !target?.closest?.('.toolbar-strip') && ['arrowleft', 'arrowright', 'arrowup', 'arrowdown'].includes(key)) {
         event.preventDefault();
         const step = event.shiftKey ? 10 : 1;
@@ -310,7 +394,7 @@ function App() {
     }
     window.addEventListener('keydown', shortcuts);
     return () => window.removeEventListener('keydown', shortcuts);
-  }, [id, mark, markIndex, activeDatum, activeText, axis, mark?.referenceValue === undefined ? null : chart]);
+  }, [id, mark, markIndex, activeDatum, activeText, axis, legendSelected, mark?.referenceValue === undefined ? null : chart]);
 
   async function exportImage() {
     if (!svg.current || exporting) return;
@@ -332,9 +416,27 @@ function App() {
   }
 
   function toolSettings() {
+    if (legendSelected) return (
+      <div className="drawing-toolbar text-toolbar" role="group" aria-label={pie ? '所选扇形图图例' : '所选图符图例'}>
+        <span className="text-toolbar-name">图例</span>
+        <button className="button compact" onClick={pie ? () => { setPieTab('legend'); setPanel('pie'); } : openPictographLegend}>
+          <SlidersHorizontal size={15} /> {pie ? '图例设置' : '编辑图例文字'}</button>
+        {pie && <button className="button compact toolbar-toggle" aria-pressed={!chart.pieLegendPosition}
+          onClick={() => onEdit(togglePieLegendAttachment)}>随图移动</button>}
+        <button className="button compact" disabled={pie ? !chart.pieLegendPosition && !chart.pieLegendOffset : !chart.pictographLegendPosition}
+          onClick={() => onEdit(pie ? resetPieLegend : resetPictographLegend)}>
+          <RotateCcw size={15} /> 还原位置</button>
+        <button className="button compact" onClick={toggleLegend}>隐藏图例</button>
+        <button className="icon-button text-toolbar-close" aria-label="关闭图例工具栏" onClick={() => choose(null)}><X size={17} /></button>
+      </div>
+    );
     if (activeText !== null) {
       const axis = activeText === 'xLabel' ? 'x' : activeText === 'yLabel' ? 'y' : undefined;
+      const note = pie && isNote(activeText) ? chart.notes.find(note => note.id === activeText && !note.exerciseQuestion) : null;
       return <TextToolbar target={activeText} style={getTextStyle(chart, activeText)}
+        followPie={note && { enabled: !!note.pieAttached, onToggle: () => onEdit(current => ({
+          ...current, notes: current.notes.map(item => item.id === note.id ? { ...item, pieAttached: !item.pieAttached || undefined } : item),
+        })) }}
         titlePlacement={axis && {
           axis, value: chart.style.axes[axis].titlePlacement, onChange: value => placeAxisTitle(axis, value),
         }}
@@ -394,9 +496,9 @@ function App() {
           </label>
         )}
         {mark && <button className="icon-button" aria-label="删除标注" title="删除标注" onClick={removeSelection}><Trash2 size={17} /></button>}
-        {tool === 'line' && stats && (
+        {tool === 'line' && stats && hasAxes && (
           <div className="statistic-options" role="group" aria-label="统计参考线">
-            {chart.series.length > 1 && (
+            {!seriesField && chart.series.length > 1 && (
               <select aria-label="统计参考线的数据系列" value={activeSeries} onChange={event => setSelectedSeries(Number(event.target.value))}>
                 {chart.series.map((series, index) => <option key={index} value={index}>{series.name}</option>)}
               </select>
@@ -425,16 +527,22 @@ function App() {
         <button className="button quiet" aria-pressed={chart.style.showTitle !== false} onClick={() => onEdit(current => ({
           ...current, style: { ...current.style, showTitle: current.style.showTitle === false },
         }))}><Type size={16} /> 图表标题</button>
-        <button className="button quiet" aria-pressed={chart.style.grid} onClick={() => onEdit(current => ({
+        {(seriesField || grouped) && chart.series.length > 1 && <label className="ink-width">{seriesField ? '展示系列' : '编辑系列'}
+          <select aria-label={seriesField ? '展示系列' : '编辑系列'} value={activeSeries} onChange={event => selectSeries(Number(event.target.value))}>
+            {chart.series.map((series, index) => <option key={index} value={index}>{series.name}</option>)}
+          </select>
+        </label>}
+        {grouped && <GroupWidthField chart={chart} onEdit={onEdit} />}
+        {hasAxes && <button className="button quiet" aria-pressed={chart.style.grid} onClick={() => onEdit(current => ({
           ...current, style: { ...current.style, grid: !current.style.grid },
-        }))}><Grid2X2 size={16} /> 网格线</button>
-        <button className="button quiet" aria-pressed={showDataLabels} onClick={toggleDataLabels}><Tags size={16} /> 数据标签</button>
-        <button className="button quiet" aria-pressed={showLegend} onClick={() => onEdit(current => ({
-          ...current, style: { ...current.style, legend: !showLegend },
-        }))}><List size={16} /> 图例</button>
-        <button className="button quiet" aria-pressed={chart.style.showOrigin} onClick={() => onEdit(current => ({
+        }))}><Grid2X2 size={16} /> 网格线</button>}
+        <button className="button quiet" aria-pressed={showDataLabels} onClick={toggleDataLabels}><Tags size={16} /> {pie ? '扇区标签' : '数据标签'}</button>
+        <button className="button quiet" aria-pressed={showLegend} onClick={toggleLegend}><List size={16} /> {pictograph ? '图符图例' : '图例'}</button>
+        {pie && chart.piePosition && <button className="button quiet" onClick={() => onEdit(current => movePie(current))}>
+          <RotateCcw size={16} /> 还原扇形位置</button>}
+        {hasAxes && <button className="button quiet" aria-pressed={chart.style.showOrigin} onClick={() => onEdit(current => ({
           ...current, style: { ...current.style, showOrigin: !current.style.showOrigin },
-        }))}>原点 0</button>
+        }))}>原点 0</button>}
         <button className="button quiet" aria-pressed={snap} title="按住 Alt 临时关闭吸附"
           onClick={() => setSnap(!snap)}><Magnet size={16} /> 吸附对齐</button>
       </div>
@@ -475,14 +583,14 @@ function App() {
             <div className="workspace-tools">
             <div className="workspace-toolbar">
               <div className="toolbar-start">
-                <div className="segmented" aria-label="图表类型" role="group">
-                  <button aria-pressed={chart.kind === 'line'} onClick={() => onEdit(current => current.kind === 'line' ? current : { ...current, kind: 'line' })}>
-                    <ChartNoAxesCombined size={17} /> 折线图
-                  </button>
-                  <button aria-pressed={chart.kind === 'bar'} onClick={() => onEdit(current => current.kind === 'bar' ? current : { ...current, kind: 'bar' })}>
-                    <ChartColumn size={17} /> 柱状图
-                  </button>
-                </div>
+                <label className="chart-kind-select">
+                  <ChartIcon size={17} aria-hidden="true" />
+                  <select aria-label="图表类型" value={chart.kind} onChange={event => changeKind(event.target.value as ChartKind)}>
+                    {Object.entries(CHART_KINDS).map(([value, { label }]) => <option key={value} value={value}>{label}</option>)}
+                  </select>
+                </label>
+                {chart.kind === 'bar' && <button className="button compact toolbar-toggle" aria-pressed={grouped}
+                  title="在普通柱状图和复式柱状图之间切换" onClick={toggleGroupedColumns}>复式柱状图</button>}
                 <div className="toolbar-group history" aria-label="编辑历史" role="group">
                   <button className="icon-button" aria-label="撤销" title="撤销（Ctrl / ⌘ + Z）" disabled={!past.length}
                     onClick={() => navigateHistory('undo')}><Undo2 size={19} /></button>
@@ -511,17 +619,17 @@ function App() {
                 </div>
                 <button className="button quiet" aria-pressed={toolbar} title={toolbar ? '隐藏工具栏' : '显示工具栏'}
                   onClick={() => setToolbar(!toolbar)}><PanelTop size={16} /> 工具栏</button>
-                <button className="button data-toggle" aria-expanded={panel === 'axes'} aria-controls={panel === 'axes' ? 'axis-panel' : undefined}
-                  onClick={() => panel === 'axes' ? setPanel(null) : openAxes(axis === 'y' ? 'y' : 'x')}>
-                  <SlidersHorizontal size={16} /> 坐标轴
+                <button className="button data-toggle" aria-expanded={openPanel === settingsPanel} aria-controls={openPanel === settingsPanel ? settingsId : undefined}
+                  onClick={() => openPanel === settingsPanel ? setPanel(null) : hasAxes ? openAxes(axis === 'y' ? 'y' : 'x') : setPanel(settingsPanel)}>
+                  <SlidersHorizontal size={16} /> {pie ? '扇形设置' : pictograph ? '象形图设置' : '坐标轴'}
                 </button>
                 <button className="button data-toggle" aria-expanded={panel === 'data'} aria-controls={panel === 'data' ? 'data-panel' : undefined}
                   onClick={() => setPanel(panel === 'data' ? null : 'data')}><Table2 size={17} /> 数据表</button>
               </div>
             </div>
-              {toolbar && <ToolbarStrip context={`${tool}:${JSON.stringify(selection)}`}>{toolSettings()}</ToolbarStrip>}
+              {toolbar && <ToolbarStrip context={`${chart.kind}:${tool}:${JSON.stringify(selection)}`}>{toolSettings()}</ToolbarStrip>}
             </div>
-            <div className={`workspace-body${panel ? ' with-data' : ''}`}>
+            <div className={`workspace-body${openPanel ? ' with-data' : ''}`}>
               <nav className="tool-rail" aria-label="绘图工具">
                 {TOOLS.map(({ id, label, icon: Icon, key }) => (
                   <button key={id} className="tool-button" aria-pressed={tool === id} onClick={() => changeTool(id)}
@@ -529,20 +637,26 @@ function App() {
                 ))}
               </nav>
               <div ref={desk} className="desk" data-zoomed={zoom > 100 || undefined} style={{ '--paper-zoom': zoom / 100 } as CSSProperties}>
-                <div className="paper-frame" key={`${projectRevision}:${id}`}>
+                <div className="paper-frame" key={`${projectRevision}:${id}:${chart.kind}`}>
                   <ChartDisplay document={chart} tool={tool} ink={currentInk} inkWidth={currentWidth}
                     inkOpacity={currentOpacity} inkArrows={currentArrows} newTextStyle={newTextStyle} eraseScope={eraseScope}
                     lineKind={currentLineKind} snap={snap} selection={selection} onSelect={choose} stats={stats} onAddStatistic={addStatistic}
-                    activeSeries={activeSeries} svgRef={svg} onEdit={onEdit} onSelectSeries={setSelectedSeries} />
+                    activeSeries={activeSeries} svgRef={svg} onEdit={onEdit} onSelectSeries={setSelectedSeries} onEditPictographLegend={openPictographLegend} />
                 </div>
               </div>
-              {panel === 'data' && <DataPanel chart={chart} onEdit={onEdit} activeSeries={activeSeries}
-                onSelectSeries={setSelectedSeries} onReplaceCategories={() => choose(null)} onRemoveSeries={deleteSeries} onClose={() => setPanel(null)} />}
-              {panel === 'axes' && <AxisPanel axis={axisTab} onSelectAxis={setAxisTab} chart={chart} onEdit={onEdit} onClose={() => setPanel(null)} />}
+              {openPanel === 'data' && <DataPanel chart={chart} onEdit={onEdit} activeSeries={activeSeries}
+                onSelectSeries={selectSeries} onReplaceCategories={() => choose(null)} onRemoveSeries={deleteSeries} onClose={() => setPanel(null)} />}
+              {openPanel === 'axes' && <AxisPanel axis={axisTab} onSelectAxis={setAxisTab} chart={chart} onEdit={onEdit} onClose={() => setPanel(null)} />}
+              {openPanel === 'pie' && <PieSettings chart={chart} onEdit={onEdit} onClose={() => setPanel(null)}
+                tab={pieTab} onSelectTab={setPieTab}
+                showLabels={showDataLabels} showLegend={showLegend} onToggleLabels={toggleDataLabels} onToggleLegend={toggleLegend} />}
+              {openPanel === 'pictograph' && <PictographSettings chart={chart} onEdit={onEdit}
+                onClose={() => setPanel(null)} onToggleLabels={toggleDataLabels} onToggleLegend={toggleLegend}
+                tab={pictographTab} onSelectTab={setPictographTab} legendInput={pictographLegendInput} />}
             </div>
             <footer className="workspace-footer">
-              <p role={notice ? 'status' : undefined}><Info size={15} /> {notice || hint}</p>
-              <span>{chart.categories.length} 个类别 <span className="separator">·</span> {pointCount} 个数据点</span>
+              <p role={notice ? 'status' : undefined}><Info size={15} /> {notice || chartHint}</p>
+              <span>{chart.categories.length} 个类别 <span className="separator">·</span> {pointCount} 个{pie ? '扇区' : '数据点'}</span>
             </footer>
           </section>
           <BoardSidebar boards={workspace.boards} activeId={id} onSelect={changeBoard}

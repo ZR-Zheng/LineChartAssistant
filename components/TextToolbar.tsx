@@ -10,10 +10,11 @@ interface Props {
   onClose?: () => void;
   onDelete?: () => void;
   onDeleteCategory?: () => void;
+  followPie?: { enabled: boolean; onToggle: () => void };
   titlePlacement?: { axis: Axis; value: TitlePlacement; onChange: (value: TitlePlacement) => void };
 }
 
-function TextToolbar({ target, style, onChange, onClose, onDelete, onDeleteCategory, titlePlacement }: Props) {
+function TextToolbar({ target, style, onChange, onClose, onDelete, onDeleteCategory, titlePlacement, followPie }: Props) {
   const name = typeof target === 'number' ? '类别标签' : isNote(target) ? '文字标注' : {
     title: '图表标题', xLabel: '横轴标题', yLabel: '纵轴标题',
   }[target];
@@ -65,6 +66,7 @@ function TextToolbar({ target, style, onChange, onClose, onDelete, onDeleteCateg
           </select>
         </label>
       )}
+      {followPie && <button className="button compact toolbar-toggle" aria-pressed={followPie.enabled} onClick={followPie.onToggle}>随图移动</button>}
       {onDelete && <button className="icon-button" aria-label={removeLabel} title={removeLabel} onClick={onDelete}><Trash2 size={16} /></button>}
       {onDeleteCategory && <button className="button compact" onClick={onDeleteCategory}>删除整个类别</button>}
       {onClose && <button className="icon-button text-toolbar-close" aria-label="关闭文字格式" title="关闭文字格式"

@@ -6,6 +6,13 @@ export interface SnapTargets { x: number[]; y: number[] }
 type Limits = Record<keyof Point, [number, number]>;
 const PAPER_LIMITS: Limits = { x: [0, WIDTH], y: [0, HEIGHT] };
 
+export function arrowOffset(key: string, accelerated: boolean): Point | null {
+  const direction = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[key];
+  if (!direction) return null;
+  const step = accelerated ? 10 : 1;
+  return { x: direction[0] * step, y: direction[1] * step };
+}
+
 function nearest(
   anchors: number[], targets: number[], tolerance: number, min = -Infinity, max = Infinity,
 ) {

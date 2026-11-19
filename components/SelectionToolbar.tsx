@@ -1,8 +1,11 @@
 import { RotateCcw, SlidersHorizontal, Tags, Trash2, X } from 'lucide-react';
 import { useId, useRef } from 'react';
-import { AXIS_LENGTHS, clamp, getSeriesStyle, movePlot, parseValue, removeCategory, setChartValue } from '../chart';
-import type { Axis, AxisStyle, ChartDocument, ChartEdit, Datum, LineKind, SeriesStyle } from '../types';
+import { AXIS_LENGTHS, clamp, DEFAULT_GROUP_WIDTH, getSeriesStyle, movePlot, parseValue, pieColor, removeCategory, setChartValue } from '../chart';
+import { DEFAULT_PICTOGRAPH_STYLE, pictographSymbolAt } from '../pictograph';
+import type { PictographSymbol } from '../pictographSymbols';
+import type { Axis, AxisStyle, ChartDocument, ChartEdit, Datum, LineKind, PictographStyle, SeriesStyle } from '../types';
 import AxisArrowheadField from './AxisArrowheadField';
+import PictographSymbolField from './PictographSymbolField';
 import ColorPicker from './ColorPicker';
 
 interface Props {
@@ -61,6 +64,19 @@ function numericOptions(options: number[], value: number) {
   return [...new Set([...options, value])].sort((a, b) => a - b);
 }
 
+export function GroupWidthField({ chart, onEdit }: { chart: ChartDocument; onEdit: ChartEdit }) {
+  const width = chart.style.groupWidth ?? DEFAULT_GROUP_WIDTH;
+  return <label className="ink-width" title="每组柱形占类别间距的比例">组宽
+    <select aria-label="组宽" value={width} onChange={event => {
+      const groupWidth = Number(event.target.value);
+      onEdit(current => ({ ...current, style: { ...current.style, groupWidth } }));
+    }}>
+      {numericOptions([0.5, 0.6, DEFAULT_GROUP_WIDTH, 0.82, 0.92], width)
+        .map(value => <option key={value} value={value}>{Math.round(value * 100)}%</option>)}
+    </select>
+  </label>;
+}
+
 export function DataSelectionToolbar({ chart, datum, onEdit, onClose, onRemoveSeries }: Props & {
   datum: Datum; onRemoveSeries: (index: number) => void;
 }) {
@@ -68,6 +84,11 @@ export function DataSelectionToolbar({ chart, datum, onEdit, onClose, onRemoveSe
   const value = series.values[datum.index];
   const appearance = getSeriesStyle(series, chart.style);
   const category = chart.categories[datum.index];
+  const pie = chart.kind === 'pie';
+  const pictograph = chart.kind === 'pictograph';
+  const symbolStyle = chart.style.pictograph;
+  const categorySymbols = symbolStyle?.symbolMode === 'category';
+  const colorMode = symbolStyle?.colorMode ?? DEFAULT_PICTOGRAPH_STYLE.colorMode;
   const menuId = useId();
   const menu = useRef<HTMLDivElement>(null);
 
@@ -78,23 +99,45 @@ export function DataSelectionToolbar({ chart, datum, onEdit, onClose, onRemoveSe
     }));
   }
 
+  function setSymbol(symbol: PictographSymbol | null) {
+    onEdit(current => categorySymbols ? {
+      ...current, pictographSymbols: current.categories.map((_, index) => index === datum.index ? symbol : current.pictographSymbols?.[index] ?? null),
+    } : {
+      ...current, style: { ...current.style, pictograph: { ...current.style.pictograph, symbol } },
+    });
+  }
+
+  function setSymbolColorMode(colorMode: PictographStyle['colorMode']) {
+    onEdit(current => ({ ...current, style: { ...current.style, pictograph: { ...current.style.pictograph, colorMode } } }));
+  }
+
   return (
     <div className="drawing-toolbar text-toolbar datum-toolbar" role="group" aria-label="数据点设置">
-      <span className="text-toolbar-name">数据点</span>
-      <NumberField label="数值" value={value} onChange={next => onEdit(chart => setChartValue(chart, datum.series, datum.index, next))} />
+      <span className="text-toolbar-name">{pie ? '扇区' : pictograph ? '图符数据' : '数据点'}</span>
+      <NumberField label="数值" value={value} onChange={next => {
+        onEdit(chart => setChartValue(chart, datum.series, datum.index, next));
+        if (pie && !(next > 0)) onClose();
+      }} />
       <TextField label="类别" value={category} onChange={name => onEdit(chart => ({
         ...chart, categories: chart.categories.map((item, index) => index === datum.index ? name : item),
       }))} />
       <TextField label="系列" value={series.name} onChange={name => onEdit(chart => ({
         ...chart, series: chart.series.map((item, index) => index === datum.series ? { ...item, name } : item),
       }))} />
-      <div className="color-field"><span>颜色</span>
-        <ColorPicker value={series.color} label="所选系列颜色" onChange={color => onEdit(chart => ({
-          ...chart, series: chart.series.map((item, index) => index === datum.series ? { ...item, color } : item),
-        }))} />
-      </div>
-      <button className="button compact toolbar-toggle" aria-pressed={appearance.showLabels} aria-label="系列数据标签"
-        onClick={() => format({ showLabels: !appearance.showLabels })}><Tags size={15} /> 数值标签</button>
+      {pictograph && <PictographSymbolField label={categorySymbols ? '类别图符' : '图符'} value={pictographSymbolAt(chart, datum.index)}
+        color={series.color} outline={symbolStyle?.outline ?? false} mode={colorMode} onModeChange={setSymbolColorMode}
+        onChange={setSymbol} onReset={categorySymbols && chart.pictographSymbols?.[datum.index] ? () => setSymbol(null) : undefined} />}
+      {(!pictograph || colorMode === 'single') && <div className="color-field"><span>{pictograph ? '图符颜色' : '颜色'}</span>
+        <ColorPicker value={pie ? pieColor(chart, datum.index) : series.color}
+          label={pie ? '所选扇区颜色' : pictograph ? '图符颜色' : '所选系列颜色'}
+          onChange={color => onEdit(chart => pie ? {
+            ...chart, pieColors: chart.categories.map((_, index) => index === datum.index ? color : chart.pieColors?.[index] ?? null),
+          } : {
+            ...chart, series: chart.series.map((item, index) => index === datum.series ? { ...item, color } : item),
+          })} />
+      </div>}
+      <button className="button compact toolbar-toggle" aria-pressed={appearance.showLabels} aria-label={pie ? '扇区标签' : '系列数据标签'}
+        onClick={() => format({ showLabels: !appearance.showLabels })}><Tags size={15} /> {pie ? '扇区标签' : '数值标签'}</button>
       {chart.kind === 'line' ? (
         <>
           <label>线宽
@@ -125,8 +168,9 @@ export function DataSelectionToolbar({ chart, datum, onEdit, onClose, onRemoveSe
             )}
           </div>
         </>
-      ) : (
+      ) : chart.kind === 'bar' && (
         <>
+          {chart.kind === 'bar' && chart.groupedColumns && <GroupWidthField chart={chart} onEdit={onEdit} />}
           <label>柱形宽度
             <select value={appearance.columnWidth} onChange={event => format({ columnWidth: Number(event.target.value) })}>
               {[0.4, 0.65, 0.86, 1].map(width => <option key={width} value={width}>{Math.round(width * 100)}%</option>)}
@@ -146,7 +190,7 @@ export function DataSelectionToolbar({ chart, datum, onEdit, onClose, onRemoveSe
         <button className="button compact" disabled={value === null} onClick={() => {
           onEdit(chart => setChartValue(chart, datum.series, datum.index, null));
           onClose();
-        }}>清除数据点</button>
+        }}>{pie ? '清除扇区数据' : '清除数据点'}</button>
         <button className="button compact" disabled={chart.categories.length <= 1} onClick={() => {
           onEdit(chart => removeCategory(chart, datum.index));
           onClose();
