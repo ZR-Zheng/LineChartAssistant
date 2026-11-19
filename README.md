@@ -1,19 +1,23 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# 统计图画板
 
-# Run and deploy your AI Studio app
+直接在画布上编辑折线图、柱状图和标注。「选择」工具可以添加或拖动数据点、调整标注、编辑文字，以及拖动轴线或原点移动坐标系。选中对象后，工具栏会显示相应的设置。
 
-This contains everything you need to run your app locally.
+- 用「标注线」绘制实线、虚线或箭头线。可以点击当前数据系列的最大值、最小值或平均值辅助线添加标注。按住 Shift 可锁定角度，按住 Alt 可暂时绕过吸附。
+- 「坐标轴」可以调整轴线、标题位置和刻度。默认纵轴标题位于轴顶上方居中，横轴标题位于横轴末端右下方。用「选择」拖动轴标题时，可吸附到刻度、轴线、标注和默认标题位置。
+- 用「文字」点击画布添加标注。工具栏可设置字体、字号、加粗、斜体、下划线和对齐。颜色设置提供基础色和自定义取色器。
+- 选中数据点、坐标轴或标注后，工具栏可调整系列外观、轴线样式、标注不透明度和箭头位置等常用设置。
+- 顶部可以隐藏工具栏、缩放画布或点击百分比还原缩放。按住 Ctrl 或 ⌘ 滚动鼠标也可以缩放。
+- 右侧「画布」可以新增、复制、切换和删除画布。删除后可在列表中点击「撤销删除」。每张画布有独立的缩放和撤销记录。
+- 点「随机生成」可按当前的折线图或柱状图类型新建练习画布。随机数据为整数并落在刻度线上，可通过「数据标签」显示具体数值。
+- 打开「数据表」可以录入精确数值、粘贴表格、导入或下载 CSV。表格首行为表头，第一列是类别，后续各列是数值。空白数值表示缺失数据。PNG 和 SVG 按图表及标注的范围导出。
 
-View your app in AI Studio: https://ai.studio/apps/drive/1hCRZLkJYEvxZIIQ92fEOLEnOM4-KiYsn
+## 本地运行
 
-## Run Locally
+需要 Node.js 和 pnpm。
 
-**Prerequisites:**  Node.js
+```sh
+pnpm install
+pnpm dev
+```
 
-
-1. Install dependencies:
-   `npm install`
-2. Run the app:
-   `npm run dev`
+生产构建使用 `pnpm build`。

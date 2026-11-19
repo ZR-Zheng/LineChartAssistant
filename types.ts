@@ -1,94 +1,112 @@
-export interface ChartDataPoint {
-  label: string;
-  [key: string]: string | number;
-}
+export type ChartKind = 'line' | 'bar';
+export type Tool = 'line' | 'pen' | 'eraser' | 'select' | 'text';
+export type LineKind = 'solid' | 'dashed' | 'arrow';
+export type ArrowPlacement = 'start' | 'end' | 'both';
+export type EraseScope = 'all' | 'marks' | 'data';
+export type Axis = 'x' | 'y';
+export type AxisLabel = 'xLabel' | 'yLabel';
+export type NoteTarget = `note:${number}`;
+export type TextTarget = 'title' | AxisLabel | NoteTarget | number;
+export type TitlePlacement = 'end' | 'center' | 'start';
+export type Statistic = 'max' | 'min' | 'mean';
+export type Datum = { series: number; index: number };
+export type Selection =
+  | { kind: 'mark'; index: number }
+  | { kind: 'text'; target: TextTarget }
+  | { kind: 'data'; datum: Datum }
+  | { kind: 'axis'; axis: Axis | 'both' };
+export type TextFont = 'system' | 'sans' | 'serif' | 'kai' | 'mono';
+export type TickMode = 'auto' | 'all' | 'interval';
 
-export interface ChartSeries {
-  dataKey: string;
+export interface TextStyle {
+  font: TextFont;
+  size: number;
   color: string;
-  name: string;
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+  alignment: 'start' | 'middle' | 'end';
 }
 
-export interface ChartPreset {
-  id: string;
-  name: string;
-  config: ChartConfig;
-  createdAt: number;
+export interface Point {
+  x: number;
+  y: number;
 }
 
-export interface ChartConfig {
-  title: string;
-  xAxisLabel: string;
-  yAxisLabel: string;
-  grid: boolean;
+export interface TextNote {
+  id: NoteTarget;
+  text: string;
+  position: Point;
+}
+
+export interface Mark {
+  type: 'line' | 'pen';
+  color: string;
+  points: Point[];
+  lineKind?: LineKind;
+  width?: number;
+  opacity?: number;
+  arrows?: ArrowPlacement;
+  referenceValue?: number;
+}
+
+export interface SeriesStyle {
+  strokeWidth: number;
+  dotSize: number;
+  dotShape: 'circle' | 'square' | 'diamond';
   dots: boolean;
-  dotShape: 'circle' | 'square' | 'triangle' | 'diamond';
-  dotFilled: boolean;
+  showLabels: boolean;
+  columnWidth: number;
+  roundedColumns: boolean;
+}
+
+export interface Series {
+  name: string;
+  color: string;
+  values: (number | null)[];
+  style?: Partial<SeriesStyle>;
+}
+
+export interface AxisStyle {
+  line: LineKind;
+  color: string;
+  width: number;
+  length: number;
+  tickLength: number;
+  tickPosition: 'outside' | 'inside' | 'cross';
+  tickMode: TickMode;
+  interval: number;
+  maximum?: number;
+  showValues: boolean;
+  showLabel: boolean;
+  titlePlacement: TitlePlacement;
+}
+
+export interface ChartStyle {
+  grid: boolean;
+  showLabels: boolean;
+  dots: boolean;
+  showOrigin: boolean;
   dotSize: number;
   strokeWidth: number;
-  smooth: boolean;
-  legend: boolean;
-  // New customizations
-  axisColor: string;
-  // showArrows removed, replaced by specific flags
-  xAxisArrowStart: boolean;
-  xAxisArrowEnd: boolean;
-  yAxisArrowStart: boolean;
-  yAxisArrowEnd: boolean;
-  
-  xAxisStartZero: boolean;
-  yAxisStartZero: boolean;
-  xAxisMin: string;
-  xAxisMax: string;
-  yAxisMin: string;
-  yAxisMax: string;
-  xAxisTickFontSize: number;
-  yAxisTickFontSize: number;
-  xAxisTickInterval: number;
-  yAxisTickCount: number;
-  yAxisTickInterval: number;
-  xAxisTickType: 'inside' | 'outside' | 'cross';
-  yAxisTickType: 'inside' | 'outside' | 'cross';
-  xAxisTickSize: number;
-  yAxisTickSize: number;
-  xAxisTickLabelDistance: number;
-  yAxisTickLabelDistance: number;
-  showLabels: boolean;
-  labelFontSize: number;
-  labelDistance: number;
-  labelOffsetX: number;
-  labelOffsetY: number;
-
-  // New visibility toggles for axis labels
-  showXAxisLabel: boolean;
-  showYAxisLabel: boolean;
-  
-  // Axis label positioning
-  xAxisLabelPosition: string;
-  yAxisLabelPosition: string;
-  xAxisLabelFontSize: number;
-  yAxisLabelFontSize: number;
-  xAxisLabelOffsetX: number;
-  xAxisLabelOffsetY: number;
-  yAxisLabelOffsetX: number;
-  yAxisLabelOffsetY: number;
-  
-  // Y-axis label orientation
-  yAxisLabelVertical: boolean; // true = vertical text, false = horizontal
-  
-  // Font settings
-  fontFamily: string;
+  axes: Record<Axis, AxisStyle>;
+  legend: boolean | 'auto';
 }
 
-export interface ParsedResponse {
-  data: ChartDataPoint[];
-  suggestedConfig: Partial<ChartConfig>;
-  seriesKeys: string[];
+export interface ChartDocument {
+  kind: ChartKind;
+  title: string;
+  xLabel: string;
+  yLabel: string;
+  categories: string[];
+  series: Series[];
+  marks: Mark[];
+  notes: TextNote[];
+  plotOffset: Point;
+  style: ChartStyle;
+  textStyles: Partial<Record<TextTarget, Partial<TextStyle>>>;
+  labelPositions: Partial<Record<AxisLabel, Point>>;
+  scaleExtent: { min: number; max: number } | null;
 }
 
-export enum ParsingStatus {
-  IDLE = 'IDLE',
-  PARSING = 'PARSING',
-  SUCCESS = 'SUCCESS',
-  ERROR = 'ERROR'
-}
+export type ChartEdit = (update: (document: ChartDocument) => ChartDocument) => void;

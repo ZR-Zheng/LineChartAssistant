@@ -1,5 +1,5 @@
 {
-  "name": "Line Chart Assistant",
-  "description": "An AI-powered line chart generator. Input raw text or data, and it generates interactive, customizable line charts with automated insights.",
+  "name": "统计图画板",
+  "description": "在画布上绘制和编辑折线图、柱状图与线条标注，支持导入表格和导出 PNG。",
   "requestFramePermissions": []
 }

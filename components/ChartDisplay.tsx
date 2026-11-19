@@ -1,593 +1,799 @@
-import React, { useRef, useCallback, useState } from 'react';
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-} from 'recharts';
-import { ChartConfig, ChartDataPoint, ChartSeries } from '../types';
-import { Download, Move } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import type { KeyboardEvent, PointerEvent, ReactNode, RefObject } from 'react';
+import { AXIS_LENGTHS, axisTitleLayout, categoryX, clamp, constrainPlotOffset, FONT, formatValue, getPlot, getScale, getSeriesStyle, getTextStyle, HEIGHT,
+  isNote, markPath, movePlot, removeNote, setChartValue, STATISTIC_LABELS, TEXT_FONTS, textValue, visibleMark, WIDTH } from '../chart';
+import type { Plot } from '../chart';
+import { NO_TARGETS, snapEndpoint, snapPoint, translateLine } from '../alignment';
+import type { Guides, SnapTargets } from '../alignment';
+import type { ArrowPlacement, Axis, AxisLabel, ChartDocument, ChartEdit, Datum, EraseScope, LineKind, Mark, NoteTarget, Point,
+  Selection, SeriesStyle, Statistic, TextStyle, TextTarget, Tool } from '../types';
+import StyledLine from './StyledLine';
 
-// 可拖动标签的位置偏移类型
-interface LabelOffset {
-  [key: string]: { dx: number; dy: number };
+type Scale = ReturnType<typeof getScale>;
+type MovableText = AxisLabel | NoteTarget;
+type Gesture = {
+  pointer: number;
+  start: Point;
+  base: ChartDocument;
+  tolerance: number;
+  targets: SnapTargets;
+} & (
+  | { type: 'data'; datum: Datum; offset: number; scale: Scale; moved: boolean }
+  | { type: 'draw'; mark: Mark; statistic?: Statistic }
+  | { type: 'line'; index: number; endpoint: 0 | 1 | null; mark: Mark }
+  | { type: 'label'; label: MovableText; position: Point; defaultPosition?: Point;
+    boundsX: [number, number]; boundsY: [number, number]; moved: boolean }
+  | { type: 'axis'; axis: Axis }
+  | { type: 'plot'; axis: Axis | 'both'; offset: Point }
+  | { type: 'newText' }
+);
+
+interface Props {
+  document: ChartDocument;
+  tool?: Tool | 'preview';
+  ink?: string;
+  inkWidth?: number;
+  inkOpacity?: number;
+  inkArrows?: ArrowPlacement;
+  lineKind?: LineKind;
+  eraseScope?: EraseScope;
+  newTextStyle?: Partial<TextStyle>;
+  snap?: boolean;
+  selection?: Selection | null;
+  onSelect?: (selection: Selection | null) => void;
+  activeSeries?: number;
+  onSelectSeries?: (index: number) => void;
+  stats?: Record<Statistic, number> | null;
+  onAddStatistic?: (statistic: Statistic) => void;
+  onEdit?: ChartEdit;
+  svgRef?: RefObject<SVGSVGElement | null>;
 }
 
-// 自定义数据点形状组件
-const CustomDot: React.FC<{
-  cx?: number;
-  cy?: number;
-  fill: string;
-  stroke: string;
-  strokeWidth: number;
-  size: number;
-  shape: 'circle' | 'square' | 'triangle' | 'diamond';
-}> = ({ cx = 0, cy = 0, fill, stroke, strokeWidth, size, shape }) => {
-  switch (shape) {
-    case 'square':
-      return (
-        <rect
-          x={cx - size}
-          y={cy - size}
-          width={size * 2}
-          height={size * 2}
-          fill={fill}
-          stroke={stroke}
-          strokeWidth={strokeWidth}
-        />
-      );
-    case 'triangle':
-      const trianglePoints = `${cx},${cy - size} ${cx - size},${cy + size} ${cx + size},${cy + size}`;
-      return (
-        <polygon
-          points={trianglePoints}
-          fill={fill}
-          stroke={stroke}
-          strokeWidth={strokeWidth}
-        />
-      );
-    case 'diamond':
-      const diamondPoints = `${cx},${cy - size} ${cx + size},${cy} ${cx},${cy + size} ${cx - size},${cy}`;
-      return (
-        <polygon
-          points={diamondPoints}
-          fill={fill}
-          stroke={stroke}
-          strokeWidth={strokeWidth}
-        />
-      );
-    case 'circle':
-    default:
-      return (
-        <circle
-          cx={cx}
-          cy={cy}
-          r={size}
-          fill={fill}
-          stroke={stroke}
-          strokeWidth={strokeWidth}
-        />
-      );
+function withinPlot({ x, y }: Point, plot: Plot) {
+  return x >= plot.left && x <= plot.right && y >= plot.top && y <= plot.bottom;
+}
+
+function shorten(text: string, max: number) {
+  const letters = Array.from(text);
+  return letters.length > max ? letters.slice(0, max - 1).join('') + '…' : text;
+}
+
+function isLightColor(color: string) {
+  const rgb = Number.parseInt(color.slice(1), 16);
+  const red = (rgb >> 16) & 255;
+  const green = (rgb >> 8) & 255;
+  const blue = rgb & 255;
+  return red * 0.299 + green * 0.587 + blue * 0.114 > 155;
+}
+
+function SeriesDot({ x, y, size, color, width, shape }: {
+  x: number; y: number; size: number; color: string; width: number; shape: SeriesStyle['dotShape'];
+}) {
+  const paint = { fill: '#fff', stroke: color, strokeWidth: width, strokeLinejoin: 'round' as const };
+  if (shape === 'square') return <rect x={x - size} y={y - size} width={2 * size} height={2 * size} {...paint} />;
+  if (shape === 'diamond') return <path d={`M ${x} ${y - size} l ${size} ${size} -${size} ${size} -${size} -${size} Z`} {...paint} />;
+  return <circle cx={x} cy={y} r={size} {...paint} />;
+}
+
+function linePath(values: (number | null)[], scale: Scale, plot: Plot) {
+  let previous: number | null = null;
+  return values.map((value, index) => {
+    const before = previous;
+    previous = value;
+    if (value === null) return '';
+    const outside = value > scale.limit;
+    const x = categoryX(index, values.length, plot);
+    if (before === null) return outside ? '' : `M${x},${scale.y(value)}`;
+    const wasOutside = before > scale.limit;
+    if (!wasOutside && !outside) return `L${x},${scale.y(value)}`;
+    if (wasOutside && outside) return '';
+
+    const difference = value - before;
+    const fraction = Number.isFinite(difference) ? (scale.limit - before) / difference
+      : (scale.limit / 2 - before / 2) / (value / 2 - before / 2);
+    const previousX = categoryX(index - 1, values.length, plot);
+    const edge = `${previousX + (x - previousX) * fraction},${plot.top}`;
+    return outside ? `L${edge}` : `M${edge} L${x},${scale.y(value)}`;
+  }).join(' ');
+}
+
+function textBounds(element: SVGGraphicsElement, canvasMatrix: DOMMatrix) {
+  const box = element.getBBox();
+  const transform = canvasMatrix.inverse().multiply(element.getScreenCTM() ?? canvasMatrix);
+  const corners = [
+    new DOMPoint(box.x, box.y), new DOMPoint(box.x + box.width, box.y),
+    new DOMPoint(box.x, box.y + box.height), new DOMPoint(box.x + box.width, box.y + box.height),
+  ].map(point => point.matrixTransform(transform));
+  return {
+    left: Math.min(...corners.map(point => point.x)), right: Math.max(...corners.map(point => point.x)),
+    top: Math.min(...corners.map(point => point.y)), bottom: Math.max(...corners.map(point => point.y)),
+  };
+}
+
+function alignmentTargets(document: ChartDocument, plot: Plot, scale: Scale, skipLine?: number, skipLabel?: MovableText) {
+  const { left, right, top, bottom } = plot;
+  const x = [left, right, (left + right) / 2, WIDTH / 2];
+  const y = [top, bottom, (top + bottom) / 2, HEIGHT / 2, scale.y(0), ...scale.ticks.map(value => scale.y(value))];
+  for (let i = 0; i < document.categories.length; i++) x.push(categoryX(i, document.categories.length, plot));
+  document.marks.forEach((item, index) => {
+    if (item.type !== 'line' || index === skipLine) return;
+    const mark = visibleMark(item, plot, scale);
+    if (!mark) return;
+    const [start, end] = mark.points;
+    x.push(start.x, end.x, (start.x + end.x) / 2);
+    y.push(start.y, end.y, (start.y + end.y) / 2);
+  });
+  for (const label of ['xLabel', 'yLabel'] as const) {
+    const axis = label === 'xLabel' ? 'x' : 'y';
+    if (!document.style.axes[axis].showLabel) continue;
+    const anchor = axisTitleLayout(axis, plot, document, scale.y(0)).point;
+    const position = label === skipLabel ? anchor : document.labelPositions[label] ?? anchor;
+    x.push(position.x);
+    y.push(position.y);
   }
-};
+  for (const note of document.notes) {
+    if (note.id === skipLabel) continue;
+    x.push(note.position.x);
+    y.push(note.position.y);
+  }
+  return { x, y };
+}
 
-// 自定义可拖动标签组件
-const DraggableLabel: React.FC<{
-  x?: number;
-  y?: number;
-  value?: number | string;
-  fill: string;
-  labelKey: string;
-  offset: { dx: number; dy: number };
-  onDrag: (key: string, dx: number, dy: number) => void;
-  isDraggable: boolean;
-  fontSize: number;
-  distance: number;
-  alwaysShow?: boolean;
-}> = ({ x = 0, y = 0, value, fill, labelKey, offset, onDrag, isDraggable, fontSize, distance, alwaysShow }) => {
-  const [isDragging, setIsDragging] = useState(false);
-  const startPos = useRef({ x: 0, y: 0, offsetX: 0, offsetY: 0 });
+function ChartDisplay({
+  document, tool = 'preview', ink = '#cb552e', inkWidth = 3.5, inkOpacity = 1, inkArrows = 'end', lineKind = 'solid',
+  eraseScope = 'all', newTextStyle, snap = true,
+  selection = null, onSelect, activeSeries = 0, onSelectSeries, stats, onAddStatistic, onEdit, svgRef,
+}: Props) {
+  const selectedLine = selection?.kind === 'mark' ? selection.index : null;
+  const selectedText = selection?.kind === 'text' ? selection.target : null;
+  const eraseMarks = tool === 'eraser' && eraseScope !== 'data';
+  const eraseData = tool === 'eraser' && eraseScope !== 'marks';
+  const gesture = useRef<Gesture | null>(null);
+  const draftRef = useRef<ChartDocument | null>(null);
+  const editorRef = useRef<HTMLInputElement>(null);
+  const [draft, setDraft] = useState<ChartDocument | null>(null);
+  const [editing, setEditing] = useState<TextTarget | null>(null);
+  const [guides, setGuides] = useState<Guides>({});
 
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (!isDraggable) return;
-    e.stopPropagation();
-    setIsDragging(true);
-    startPos.current = {
-      x: e.clientX,
-      y: e.clientY,
-      offsetX: offset.dx,
-      offsetY: offset.dy,
-    };
-
-    const handleMouseMove = (moveEvent: MouseEvent) => {
-      const dx = moveEvent.clientX - startPos.current.x + startPos.current.offsetX;
-      const dy = moveEvent.clientY - startPos.current.y + startPos.current.offsetY;
-      onDrag(labelKey, dx, dy);
-    };
-
-    const handleMouseUp = () => {
-      setIsDragging(false);
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
+  const stopGesture = () => {
+    gesture.current = null;
+    draftRef.current = null;
+    setDraft(null);
+    setGuides({});
   };
 
-  return (
-    <text
-      x={x + offset.dx}
-      y={y + offset.dy - distance}
-      fill={fill}
-      fontSize={fontSize}
-      fontWeight={600}
-      textAnchor="middle"
-      style={{ 
-        cursor: isDraggable ? (isDragging ? 'grabbing' : 'grab') : 'default',
-        userSelect: 'none',
-        // 在拖动模式下添加视觉提示
-        opacity: isDraggable ? 1 : 1,
-        filter: isDragging ? 'drop-shadow(0 0 2px rgba(99, 102, 241, 0.8))' : 'none',
-      }}
-      onMouseDown={handleMouseDown}
-    >
-      {value}
-    </text>
-  );
-};
+  useEffect(() => {
+    if (tool === 'preview') return;
+    const cancel = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape' && gesture.current) stopGesture();
+    };
+    window.addEventListener('keydown', cancel);
+    return () => window.removeEventListener('keydown', cancel);
+  }, [tool]);
 
-interface ChartDisplayProps {
-  data: ChartDataPoint[];
-  config: ChartConfig;
-  series: ChartSeries[];
-}
+  useEffect(() => {
+    if (tool !== 'preview') stopGesture();
+  }, [document, tool]);
 
-const ChartDisplay: React.FC<ChartDisplayProps> = ({ data, config, series }) => {
-  const chartRef = useRef<HTMLDivElement>(null);
-  const [labelOffsets, setLabelOffsets] = useState<LabelOffset>({});
-  const [isDraggableMode, setIsDraggableMode] = useState(false);
+  useEffect(() => {
+    if (selectedText === null) setEditing(null);
+  }, [selectedText]);
 
-  const handleLabelDrag = useCallback((key: string, dx: number, dy: number) => {
-    setLabelOffsets(prev => ({
-      ...prev,
-      [key]: { dx, dy }
-    }));
-  }, []);
+  function setPreview(preview: ChartDocument) {
+    draftRef.current = preview;
+    setDraft(preview);
+  }
 
-  const resetLabelPositions = useCallback(() => {
-    setLabelOffsets({});
-  }, []);
+  function pointerPosition(event: PointerEvent<SVGSVGElement>): Point | null {
+    const matrix = event.currentTarget.getScreenCTM();
+    if (!matrix) return null;
+    const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse());
+    return { x: clamp(point.x, 0, WIDTH), y: clamp(point.y, 0, HEIGHT) };
+  }
 
-  const handleExportPNG = useCallback(async () => {
-    if (!chartRef.current) return;
-    
-    try {
-      const svg = chartRef.current.querySelector('svg');
-      if (!svg) return;
+  function startGesture(event: PointerEvent<SVGSVGElement>) {
+    if (tool === 'preview' || !event.isPrimary || event.button !== 0 || gesture.current) return;
+    const element = event.target as Element;
+    if (element.closest('foreignObject')) return;
+    const target = element.closest<SVGElement>('[data-datum], [data-mark], [data-editable], [data-move-text], [data-note], [data-axis-end], [data-axis-target], [data-stat]');
+    const movingText = target?.dataset.moveText as MovableText | undefined;
+    if (target?.hasAttribute('data-editable') && !movingText) return;
 
-      // 克隆SVG以避免修改原始元素
-      const clonedSvg = svg.cloneNode(true) as SVGSVGElement;
-      
-      // 获取SVG的实际尺寸
-      const svgRect = svg.getBoundingClientRect();
-      const svgWidth = svgRect.width || svg.clientWidth || 800;
-      const svgHeight = svgRect.height || svg.clientHeight || 400;
-      
-      // 设置克隆SVG的正确尺寸和viewBox
-      clonedSvg.setAttribute('width', String(svgWidth));
-      clonedSvg.setAttribute('height', String(svgHeight));
-      if (!clonedSvg.getAttribute('viewBox')) {
-        clonedSvg.setAttribute('viewBox', `0 0 ${svgWidth} ${svgHeight}`);
+    const point = pointerPosition(event);
+    if (!point) return;
+    const plot = getPlot(document.style, document.plotOffset);
+    const scale = getScale(document.series, document.scaleExtent, plot, document.style.axes.y);
+    const matrix = event.currentTarget.getScreenCTM();
+    if (!matrix) return;
+    const tolerance = clamp(7 / Math.hypot(matrix.a, matrix.b), 4, 19);
+    const indexOfMark = target?.hasAttribute('data-mark') ? Number(target.dataset.mark) : undefined;
+    const datum = target?.hasAttribute('data-datum')
+      ? { series: Number(target.dataset.series), index: Number(target.dataset.index) }
+      : null;
+
+    if (tool === 'eraser') {
+      if (eraseMarks && indexOfMark !== undefined) {
+        onSelect?.(null);
+        onEdit(current => ({ ...current, marks: current.marks.filter((_, i) => indexOfMark !== i) }));
+      } else if (eraseMarks && target?.dataset.note) {
+        onEdit(current => removeNote(current, target.dataset.note as NoteTarget));
+      } else if (eraseData && datum) {
+        onEdit(current => setChartValue(current, datum.series, datum.index, null));
       }
-      
-      // 添加必要的命名空间
-      clonedSvg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-      clonedSvg.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
-      
-      // 将计算样式内联到SVG元素中（确保图例等元素正确导出）
-      const applyInlineStyles = (element: Element) => {
-        const computedStyle = window.getComputedStyle(element as HTMLElement);
-        const originalElement = svg.querySelector(`[class="${element.getAttribute('class')}"]`);
-        if (originalElement) {
-          const origStyle = window.getComputedStyle(originalElement as HTMLElement);
-          // 仅对文本元素应用字体样式
-          if (element.tagName === 'text' || element.tagName === 'tspan') {
-            (element as HTMLElement).style.fontFamily = origStyle.fontFamily;
-            (element as HTMLElement).style.fontSize = origStyle.fontSize;
-            (element as HTMLElement).style.fontWeight = origStyle.fontWeight;
-          }
-        }
-        Array.from(element.children).forEach(child => applyInlineStyles(child));
-      };
-      applyInlineStyles(clonedSvg);
-
-      const svgData = new XMLSerializer().serializeToString(clonedSvg);
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-
-      const img = new Image();
-      const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
-      const url = URL.createObjectURL(svgBlob);
-
-      img.onload = () => {
-        const scale = 2;
-        const titleHeight = config.title ? 50 : 0;
-        const padding = 20;
-        
-        canvas.width = (svgWidth + padding * 2) * scale;
-        canvas.height = (svgHeight + titleHeight + padding * 2) * scale;
-        ctx.scale(scale, scale);
-        
-        // 填充白色背景
-        ctx.fillStyle = 'white';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
-        // 绘制标题
-        if (config.title) {
-          ctx.fillStyle = '#1e293b';
-          ctx.font = `bold 20px ${config.fontFamily}`;
-          ctx.textAlign = 'center';
-          ctx.fillText(config.title, (svgWidth + padding * 2) / 2, padding + 25);
-        }
-        
-        // 绘制图表（SVG已包含图例）
-        ctx.drawImage(img, padding, titleHeight + padding, svgWidth, svgHeight);
-        URL.revokeObjectURL(url);
-
-        const pngUrl = canvas.toDataURL('image/png');
-        const downloadLink = document.createElement('a');
-        downloadLink.href = pngUrl;
-        downloadLink.download = `${config.title || 'chart'}.png`;
-        document.body.appendChild(downloadLink);
-        downloadLink.click();
-        document.body.removeChild(downloadLink);
-      };
-
-      img.src = url;
-    } catch (error) {
-      console.error('导出PNG失败:', error);
+      return;
     }
-  }, [config.title, config.fontFamily]);
 
-  if (!data || data.length === 0) {
+    const base = {
+      pointer: event.pointerId, start: point, base: document, tolerance,
+      targets: NO_TARGETS,
+    };
+    if (movingText) {
+      const defaultPosition = isNote(movingText) ? undefined
+        : axisTitleLayout(movingText === 'xLabel' ? 'x' : 'y', plot, document, scale.y(0)).point;
+      const position = isNote(movingText) ? document.notes.find(note => note.id === movingText).position
+        : document.labelPositions[movingText] ?? defaultPosition;
+      const box = textBounds(target as SVGGraphicsElement, matrix);
+      gesture.current = {
+        ...base, type: 'label', label: movingText, position, defaultPosition, moved: false,
+        boundsX: [position.x - box.left + 5, WIDTH - (box.right - position.x) - 5],
+        boundsY: [position.y - box.top + 5, HEIGHT - (box.bottom - position.y) - 5],
+        targets: alignmentTargets(document, plot, scale, undefined, movingText),
+      };
+    } else if (target?.hasAttribute('data-axis-end')) {
+      gesture.current = { ...base, type: 'axis', axis: target.dataset.axisEnd as Axis };
+    } else if (target?.hasAttribute('data-axis-target')) {
+      gesture.current = { ...base, type: 'plot', axis: target.dataset.axisTarget as Axis | 'both',
+        offset: constrainPlotOffset(document.style, document.plotOffset) };
+    } else if (indexOfMark !== undefined && (tool === 'line' || tool === 'select')) {
+      const endpoint = target.dataset.endpoint === undefined ? null : Number(target.dataset.endpoint) as 0 | 1;
+      const mark = visibleMark(document.marks[indexOfMark], plot, scale);
+      if (!mark) return;
+      gesture.current = {
+        ...base, type: 'line', index: indexOfMark, endpoint, mark,
+        targets: alignmentTargets(document, plot, scale, indexOfMark),
+      };
+    } else if (tool === 'select') {
+      if (!datum && !withinPlot(point, plot)) {
+        editorRef.current?.blur();
+        onSelect?.(null);
+        return;
+      }
+      const index = clamp(Math.floor((point.x - plot.left) / (plot.right - plot.left) * document.categories.length), 0, document.categories.length - 1);
+      const selected = datum ?? { series: activeSeries, index };
+      const value = document.series[selected.series].values[selected.index];
+      const offset = datum && value !== null ? scale.y(Math.min(value, scale.limit)) - point.y : 0;
+      gesture.current = { ...base, type: 'data', datum: selected, scale, offset, moved: !datum };
+      onSelectSeries(selected.series);
+      if (!datum) setPreview(setChartValue(document, selected.series, selected.index, scale.valueAt(point.y)));
+    } else if (tool === 'text') {
+      gesture.current = { ...base, type: 'newText' };
+    } else {
+      const targets = tool === 'line' ? alignmentTargets(document, plot, scale) : NO_TARGETS;
+      if (tool === 'line' && stats) {
+        for (const value of Object.values(stats)) if (scale.includes(value)) targets.y.push(scale.y(value));
+      }
+      const start = tool === 'line' && snap && !event.altKey ? snapPoint(point, targets, tolerance).point : point;
+      const mark: Mark = {
+        type: tool, color: ink, width: inkWidth, opacity: inkOpacity, points: tool === 'line' ? [start, start] : [start],
+        ...(tool === 'line' && { lineKind, arrows: inkArrows }),
+      };
+      gesture.current = { ...base, type: 'draw', mark, targets,
+        statistic: target?.dataset.stat as Statistic | undefined };
+      if (tool === 'pen') setPreview({ ...document, marks: [...document.marks, mark] });
+    }
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function moveGesture(event: PointerEvent<SVGSVGElement>, finish = false) {
+    const current = gesture.current;
+    if (!current || current.pointer !== event.pointerId) return;
+    const point = pointerPosition(event);
+    if (!point) return;
+    const offset = { x: point.x - current.start.x, y: point.y - current.start.y };
+    const distance = Math.hypot(offset.x, offset.y);
+    const threshold = Math.max(2, current.tolerance * 0.35);
+    const targets = snap && !event.altKey ? current.targets : NO_TARGETS;
+    const tolerance = snap && !event.altKey ? current.tolerance : 0;
+
+    if (current.type === 'newText') return;
+
+    if (current.type === 'data') {
+      if (!current.moved && distance < threshold) return;
+      current.moved = true;
+      const { datum, scale } = current;
+      setPreview(setChartValue(current.base, datum.series, datum.index, scale.valueAt(point.y + current.offset)));
+      return;
+    }
+
+    if (current.type === 'plot') {
+      if (distance < threshold && !draftRef.current) return;
+      setPreview(movePlot(current.base, { x: current.offset.x + offset.x, y: current.offset.y + offset.y }));
+      return;
+    }
+
+    if (current.type === 'axis') {
+      if (distance < threshold && !draftRef.current) return;
+      const { axis } = current;
+      const old = current.base.style.axes[axis];
+      const { min, max } = AXIS_LENGTHS[axis];
+      const length = clamp(Math.round(old.length + (axis === 'x' ? offset.x : -offset.y)), min, max);
+      const style = { ...current.base.style, axes: { ...current.base.style.axes, [axis]: { ...old, length } } };
+      setPreview(length === old.length ? current.base : { ...current.base, style });
+      return;
+    }
+
+    if (current.type === 'label') {
+      if (!current.moved && distance < threshold) return;
+      current.moved = true;
+      const { label, position } = current;
+      const { point, guides } = snapPoint(
+        { x: position.x + offset.x, y: position.y + offset.y }, targets, tolerance,
+        { x: current.boundsX, y: current.boundsY },
+      );
+      setGuides(guides);
+      const base = current.base;
+      if (point.x === position.x && point.y === position.y) setPreview(base);
+      else if (isNote(label)) {
+        setPreview({ ...base, notes: base.notes.map(note => note.id === label ? { ...note, position: point } : note) });
+      } else {
+        const { defaultPosition } = current;
+        const labelPositions = { ...base.labelPositions, [label]: point };
+        if (point.x === defaultPosition.x && point.y === defaultPosition.y) delete labelPositions[label];
+        setPreview({ ...base, labelPositions });
+      }
+      return;
+    }
+
+    if (current.type === 'line') {
+      if (distance < threshold && !draftRef.current) return;
+      const { mark } = current;
+      const endpoint = current.endpoint;
+      let points: Point[];
+      if (endpoint === null) {
+        const aligned = translateLine(mark.points, offset, targets, tolerance);
+        points = aligned.points;
+        setGuides(tolerance > 0 ? aligned.guides : {});
+      } else {
+        const fixed = mark.points[1 - endpoint];
+        const initial = mark.points[endpoint];
+        const aimed = { x: clamp(initial.x + offset.x, 0, WIDTH), y: clamp(initial.y + offset.y, 0, HEIGHT) };
+        const aligned = snapEndpoint(fixed, aimed, targets, tolerance, event.shiftKey);
+        if (Math.hypot(fixed.x - aligned.point.x, fixed.y - aligned.point.y) < 4) return;
+        points = mark.points.map((point, i) => endpoint === i ? aligned.point : point);
+        setGuides(tolerance > 0 || event.shiftKey ? aligned.guides : {});
+      }
+      const changed = points.some((point, i) => point.x !== mark.points[i].x || point.y !== mark.points[i].y);
+      setPreview(changed ? {
+        ...current.base, marks: current.base.marks.map((item, i) =>
+          i === current.index ? { ...mark, points, referenceValue: undefined } : item),
+      } : current.base);
+      return;
+    }
+
+    const { mark } = current;
+    if (mark.type === 'line') {
+      if (distance < threshold && !draftRef.current) return;
+      const start = mark.points[0];
+      const end = snapEndpoint(start, point, targets, tolerance, event.shiftKey);
+      current.mark = { ...mark, points: [start, end.point] };
+      setGuides(tolerance > 0 || event.shiftKey ? end.guides : {});
+      setPreview({ ...current.base, marks: [...current.base.marks, current.mark] });
+      return;
+    }
+    const last = mark.points[mark.points.length - 1];
+    const distinct = point.x !== last.x || point.y !== last.y;
+    if (!distinct || !finish && Math.hypot(point.x - last.x, point.y - last.y) < 2) return;
+    const points = [...mark.points, point];
+    current.mark = { ...mark, points };
+    setPreview({ ...current.base, marks: [...current.base.marks, current.mark] });
+  }
+
+  function finishGesture(event: PointerEvent<SVGSVGElement>) {
+    const current = gesture.current;
+    if (!current || current.pointer !== event.pointerId) return;
+    moveGesture(event, true);
+    const preview = draftRef.current;
+    const newLine = current.type === 'draw' && current.mark.type === 'line';
+    stopGesture();
+    const validLine = !newLine || Math.hypot(current.mark.points[1].x - current.mark.points[0].x,
+      current.mark.points[1].y - current.mark.points[0].y) >= 4;
+    if (current.type === 'newText') {
+      const next = document.notes.reduce((max, note) => Math.max(max, Number(note.id.slice(5))), 0) + 1;
+      const id: NoteTarget = `note:${next}`;
+      const halfWidth = newTextStyle?.size ?? 18;
+      const alignment = newTextStyle?.alignment ?? 'start';
+      const left = alignment === 'end' ? halfWidth * 2 + 6 : alignment === 'middle' ? halfWidth + 6 : 10;
+      const right = alignment === 'start' ? WIDTH - halfWidth * 2 - 6 : alignment === 'middle' ? WIDTH - halfWidth - 6 : WIDTH - 10;
+      const position = { x: clamp(current.start.x, left, right), y: clamp(current.start.y, halfWidth + 8, HEIGHT - 8) };
+      editorRef.current?.blur();
+      onEdit(chart => ({
+        ...chart, notes: [...chart.notes, { id, position, text: '文字' }],
+        textStyles: newTextStyle ? { ...chart.textStyles, [id]: newTextStyle } : chart.textStyles,
+      }));
+      startTextEditing(id);
+      return;
+    }
+    if (current.type === 'draw' && current.statistic && !preview) {
+      onAddStatistic?.(current.statistic);
+      return;
+    }
+    if (preview && preview !== current.base && validLine) {
+      const next = current.type === 'data' ? { ...preview, scaleExtent: current.scale.extent } : preview;
+      onEdit(latest => latest === current.base ? next : latest);
+    }
+    if (current.type === 'label' && !current.moved) startTextEditing(current.label);
+    else {
+      editorRef.current?.blur();
+      if (current.type === 'label') onSelect({ kind: 'text', target: current.label });
+      else if (current.type === 'data') onSelect({ kind: 'data', datum: current.datum });
+      else if (current.type === 'axis' || current.type === 'plot') onSelect({ kind: 'axis', axis: current.axis });
+      else if (current.type === 'line') onSelect({ kind: 'mark', index: current.index });
+      else if (preview && validLine) onSelect({ kind: 'mark', index: preview.marks.length - 1 });
+    }
+  }
+
+  function cancelGesture(event: PointerEvent<SVGSVGElement>) {
+    if (gesture.current?.pointer === event.pointerId) stopGesture();
+  }
+
+  function startTextEditing(target: TextTarget) {
+    if (editing !== target) editorRef.current?.blur();
+    onSelect({ kind: 'text', target });
+    setEditing(target);
+  }
+
+  function editText(target: TextTarget, value: string) {
+    setEditing(null);
+    const text = value.trim();
+    onEdit(current => {
+      if (isNote(target)) {
+        if (text === textValue(current, target)) return current;
+        if (!text) {
+          return removeNote(current, target);
+        }
+        return { ...current, notes: current.notes.map(note => note.id === target ? { ...note, text } : note) };
+      }
+      if (typeof target !== 'number') return current[target] === text ? current : { ...current, [target]: text };
+      if (current.categories[target] === text) return current;
+      return { ...current, categories: current.categories.map((category, i) => i === target ? text : category) };
+    });
+  }
+
+  const chart = draft ?? document;
+  const plot = getPlot(chart.style, chart.plotOffset);
+  const scale = gesture.current?.type === 'data' ? gesture.current.scale : getScale(chart.series, chart.scaleExtent, plot, chart.style.axes.y);
+  const count = chart.categories.length;
+  const spacing = (plot.right - plot.left) / count;
+  const groupWidth = Math.min(spacing * 0.72, 54 * chart.series.length);
+  const barWidth = groupWidth / chart.series.length;
+  const labelEvery = Math.ceil(count / Math.max(1, Math.floor((plot.right - plot.left) / 58)));
+  const valueEvery = Math.max(1, Math.ceil(30 / spacing));
+  const zero = scale.y(0);
+  const { style } = chart;
+  const { x: xAxis, y: yAxis } = style.axes;
+  const xTickEvery = xAxis.tickMode === 'all' ? 1 : xAxis.tickMode === 'interval' ? xAxis.interval : labelEvery;
+  const categoryBand = spacing * Math.min(xTickEvery, count);
+  const angledCategories = categoryBand < 44 && chart.categories.some((category, index) => (
+    index % xTickEvery === 0 && Array.from(category).length * 14 > categoryBand - 6
+  ));
+  const yTickSize = clamp(scale.tickSpacing * 0.85, 4, 13);
+  const xEnd = { x: plot.right + 10, y: zero };
+  const yEnd = { x: plot.left, y: plot.top - 8 };
+  const xTitle = axisTitleLayout('x', plot, chart, zero);
+  const yTitle = axisTitleLayout('y', plot, chart);
+  const xLabel = chart.labelPositions.xLabel ?? xTitle.point;
+  const yLabel = chart.labelPositions.yLabel ?? yTitle.point;
+  const legendColumns = Math.min(chart.series.length, clamp(Math.floor((plot.right - plot.left) / 92), 1, 6));
+  const legendLimit = Math.min(12, legendColumns * 3);
+  const legendLeft = (plot.left + plot.right - legendColumns * 92) / 2;
+  const legendRows = Math.ceil(Math.min(chart.series.length, legendLimit) / legendColumns);
+  const legendTop = Math.min(plot.bottom + (xAxis.showLabel ? 98 : 72), HEIGHT - 15 - (legendRows - 1) * 16);
+
+  function handleDatumKey(event: KeyboardEvent<SVGGElement>, series: number, index: number, value: number) {
+    if (!['ArrowUp', 'ArrowDown', 'Delete', 'Backspace'].includes(event.key)) return;
+    event.preventDefault();
+    const next = event.key === 'ArrowUp' ? scale.nudge(value, 1)
+      : event.key === 'ArrowDown' ? scale.nudge(value, -1) : null;
+    onEdit(current => setChartValue(current, series, index, next));
+  }
+
+  function chartText(target: TextTarget, x: number, y: number, fallback: string, options: {
+    anchor?: 'start' | 'middle' | 'end';
+    width?: number;
+    max?: number;
+    maxWidth?: number;
+    rotation?: number;
+  } = {}) {
+    const { width = 160, max = 12, maxWidth = Infinity, rotation = 0 } = options;
+    const textStyle = getTextStyle(chart, target);
+    const customStyle = chart.textStyles?.[target];
+    const { color, bold, italic, underline } = textStyle;
+    const fontFamily = TEXT_FONTS[textStyle.font].family;
+    const text = textValue(chart, target);
+    const axisLabel = target === 'xLabel' || target === 'yLabel' ? target : undefined;
+    const note = isNote(target) ? target : undefined;
+    const anchor = note ? textStyle.alignment : options.anchor ?? 'middle';
+    const fontStyle = italic ? 'italic' : undefined;
+    const textDecoration = underline ? 'underline' : undefined;
+    const canEdit = tool === 'select' || (tool === 'text' && Boolean(note));
+    const isSelected = selectedText === target;
+    const showPlaceholder = !text && canEdit;
+    const editorX = clamp(x - width / 2, 6, WIDTH - width - 6);
+    const activate = canEdit ? () => startTextEditing(target) : undefined;
+    const horizontalSpace = anchor === 'start' ? WIDTH - 6 - x : anchor === 'end' ? x - 6 : 2 * Math.min(x - 6, WIDTH - 6 - x);
+    const available = Math.max(8, Math.min(maxWidth,
+      rotation === -90 ? 2 * Math.min(y - 6, HEIGHT - 6 - y) : horizontalSpace));
+    const size = typeof target === 'number' && customStyle?.size === undefined
+      ? Math.min(textStyle.size, Math.max(5, rotation ? categoryBand * 0.85 : available / 2))
+      : textStyle.size;
+    const display = shorten(text || fallback, Math.max(1, Math.min(max, Math.floor(available / size))));
+    const editorHeight = size + 22;
     return (
-      <div className="h-full w-full flex items-center justify-center bg-white rounded-xl border border-slate-200 text-slate-400">
-        <p>暂无数据，请在左侧输入数据</p>
-      </div>
+      <g key={target}>
+        {(text || showPlaceholder) && (
+          <text x={x} y={y} textAnchor={anchor} fontSize={size} fill={showPlaceholder ? '#687780' : color}
+            fontFamily={fontFamily} fontWeight={bold ? 700 : 500} fontStyle={fontStyle}
+            style={underline ? { textDecoration } : undefined}
+            pointerEvents={tool === 'eraser' && !eraseMarks ? 'none' : undefined}
+            transform={rotation ? `rotate(${rotation} ${x} ${y})` : undefined}
+            data-editor={showPlaceholder ? '' : undefined}
+            className={activate ? axisLabel || note ? 'canvas-text axis-label' : 'canvas-text' : undefined}
+            data-text-selected={isSelected ? '' : undefined}
+            data-custom-size={customStyle?.size !== undefined || typeof target === 'number' ? '' : undefined}
+            data-editable={activate ? '' : undefined} role={activate ? 'button' : undefined}
+            data-axis-label={activate ? axisLabel : undefined}
+            data-note={note}
+            data-move-text={activate ? axisLabel ?? note : undefined}
+            tabIndex={activate ? 0 : undefined} aria-label={activate ? `编辑${fallback}${text ? `：${text}` : ''}` : undefined}
+            onClick={axisLabel || note ? undefined : activate} onKeyDown={activate ? event => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                activate();
+              }
+            } : undefined}>
+            {display}
+          </text>
+        )}
+        {editing === target && (
+          <foreignObject x={editorX} y={clamp(y - size - 8, 2, HEIGHT - editorHeight - 2)} width={width} height={editorHeight} data-editor="">
+            <input ref={editorRef} className="canvas-input" aria-label={fallback} defaultValue={text}
+              style={{ fontFamily, fontSize: Math.max(16, size), fontWeight: bold ? 700 : 500, color, fontStyle, textDecoration }}
+              autoFocus onFocus={event => event.currentTarget.select()}
+              onBlur={event => editText(target, event.currentTarget.value)}
+              onKeyDown={event => {
+                if (event.nativeEvent.isComposing) return;
+                if (event.key === 'Enter') event.currentTarget.blur();
+                if (event.key === 'Escape') {
+                  event.currentTarget.value = text;
+                  event.currentTarget.blur();
+                  onSelect(null);
+                }
+              }} />
+          </foreignObject>
+        )}
+      </g>
     );
   }
 
-  // Padding logic to extend axes when arrows are present
-  // If arrow is present at start, we add padding to the start side.
-  // If arrow is present at end, we add padding to the end side.
-  const xAxisPadding = { 
-    left: config.xAxisArrowStart ? 20 : 10, 
-    right: config.xAxisArrowEnd ? 30 : (config.xAxisLabelPosition === 'axisLabelRight' ? 50 : 10)
-  };
-  
-  const yAxisPadding = { 
-    top: config.yAxisArrowStart ? 20 : (config.yAxisLabelPosition === 'yAxisTop' ? 35 : 10), 
-    bottom: config.yAxisArrowEnd ? 30 : 10 
-  };
+  const dataGraphics: ReactNode[] = chart.series.map((series, seriesIndex) => {
+    const seriesStyle = getSeriesStyle(series, style);
+    const columnWidth = barWidth * seriesStyle.columnWidth;
+    const lightColor = isLightColor(series.color);
+    return (
+    <g key={seriesIndex}>
+      {chart.kind === 'line' && (
+        <path d={linePath(series.values, scale, plot)} fill="none" stroke={series.color} strokeWidth={seriesStyle.strokeWidth}
+          strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />
+      )}
+      {series.values.map((value, index) => {
+        if (value === null) return null;
+        const clipped = value > scale.limit;
+        if (clipped && (chart.kind === 'line' || scale.limit === 0)) return null;
+        const center = categoryX(index, count, plot);
+        const x = chart.kind === 'bar' ? center - groupWidth / 2 + (seriesIndex + 0.5) * barWidth : center;
+        const y = scale.y(Math.min(value, scale.limit));
+        const negativeBar = value < 0 && chart.kind === 'bar';
+        const labelInside = negativeBar && y + 20 >= plot.bottom && y - zero >= 24 && barWidth >= 30;
+        const labelGap = chart.kind === 'line' ? Math.max(13, seriesStyle.dotSize + 7) : 13;
+        const labelY = labelInside ? y - 7 : negativeBar && y + 20 < plot.bottom ? y + 17 : y - labelGap - seriesIndex % 3 * 3;
+        const editable = tool === 'select';
+        const activeDatum = editable || eraseData;
+        const isSelected = selection?.kind === 'data' && selection.datum.series === seriesIndex && selection.datum.index === index;
+        return (
+          <g key={index} data-datum="" data-series={seriesIndex} data-index={index}
+            className={activeDatum ? 'chart-datum' : undefined}
+            role={editable ? 'button' : undefined} tabIndex={editable ? 0 : undefined}
+            aria-label={editable ? `${chart.categories[index]}，${series.name}，${formatValue(value)}` : undefined}
+            onFocus={editable ? () => onSelect({ kind: 'data', datum: { series: seriesIndex, index } }) : undefined}
+            onKeyDown={editable ? event => handleDatumKey(event, seriesIndex, index, value) : undefined}>
+            {chart.kind === 'bar' ? (
+              <>
+                <rect x={x - columnWidth / 2} y={Math.min(y, zero) - (value === 0 ? 1.5 : 0)} width={columnWidth}
+                  height={Math.max(1.5, Math.abs(y - zero))}
+                  rx={seriesStyle.roundedColumns ? Math.min(4, barWidth * 0.1) : undefined} fill={series.color} />
+                {activeDatum && <rect x={x - barWidth / 2} y={Math.min(y, zero) - 6} width={barWidth}
+                  height={Math.abs(y - zero) + 12} fill="transparent" data-editor-only="" />}
+              </>
+            ) : (
+              <>
+                {(series.style?.dots ?? (seriesStyle.dots || series.values[index - 1] == null && series.values[index + 1] == null)) && (
+                  <SeriesDot x={x} y={y} size={seriesStyle.dotSize} width={seriesStyle.strokeWidth}
+                    shape={seriesStyle.dotShape} color={series.color} />
+                )}
+                {activeDatum && <circle cx={x} cy={y} r={Math.max(12, seriesStyle.dotSize + 4)} fill="transparent" data-editor-only="" />}
+              </>
+            )}
+            {seriesStyle.showLabels && !clipped && index % valueEvery === 0 && (
+              <text x={x} y={labelY} textAnchor="middle" fontSize="14" fontWeight="650"
+                fill={lightColor ? '#26334c' : labelInside ? '#fff' : series.color} pointerEvents="none">
+                {formatValue(value)}
+              </text>
+            )}
+            {isSelected && <circle cx={x} cy={y} r={chart.kind === 'line' ? Math.max(9, seriesStyle.dotSize + 4) : 9}
+              fill="none" stroke="#6983ef" strokeWidth="2"
+              pointerEvents="none" data-editor-only="" />}
+          </g>
+        );
+      })}
+    </g>
+    );
+  });
 
-  const xTickFontSize = config.xAxisTickFontSize || 12;
-  const yTickFontSize = config.yAxisTickFontSize || 12;
-  const xLabelFontSize = config.xAxisLabelFontSize || 12;
-  const yLabelFontSize = config.yAxisLabelFontSize || 12;
-
-  // --- X-Axis Label Configuration ---
-  // 规范化的位置选项: left (左侧), center (居中), right (右侧), axisLabelRight (轴标签右侧)
-  const xOffsetX = config.xAxisLabelOffsetX || 0;
-  const xOffsetY = config.xAxisLabelOffsetY || 0;
-  
-  // 计算X轴标签的基础偏移，根据是否有箭头来调整
-  const xAxisLabelBaseOffset = config.xAxisArrowEnd ? 0 : 15;
-  
-  let xAxisLabelProps: any = {
-    value: config.xAxisLabel,
-    fill: config.axisColor,
-    fontSize: xLabelFontSize,
-    style: { fontFamily: config.fontFamily },
-  };
-
-  switch (config.xAxisLabelPosition) {
-    case 'left':
-      xAxisLabelProps = {
-        ...xAxisLabelProps,
-        position: 'insideBottomLeft',
-        dy: 10 + xOffsetY,
-        dx: xOffsetX,
-        offset: 0,
-      };
-      break;
-    case 'center':
-      xAxisLabelProps = {
-        ...xAxisLabelProps,
-        position: 'insideBottom',
-        dy: 10 + xOffsetY,
-        dx: xOffsetX,
-        offset: 0,
-      };
-      break;
-    case 'right':
-      xAxisLabelProps = {
-        ...xAxisLabelProps,
-        position: 'insideBottomRight',
-        dy: 10 + xOffsetY,
-        dx: xOffsetX,
-        offset: 0,
-      };
-      break;
-    case 'axisLabelRight':
-    default:
-      // 轴标签右侧 - 在最后一个刻度标签的右边
-      xAxisLabelProps = {
-        ...xAxisLabelProps,
-        position: 'right',
-        dy: -2 + xOffsetY,
-        dx: -8 + xAxisLabelBaseOffset + xOffsetX,
-        offset: 0,
-      };
-      break;
+  function tickOffset(axis: Axis) {
+    const { tickLength, tickPosition } = style.axes[axis];
+    if (tickPosition === 'cross') return [-tickLength / 2, tickLength / 2];
+    if (tickPosition === 'inside') return [-tickLength, 0];
+    return [0, tickLength];
   }
 
-
-  // --- Y-Axis Label Configuration ---
-  // 规范化的位置选项: top (顶部), center (居中), bottom (底部), yAxisTop (Y轴顶部)
-  const yOffsetX = config.yAxisLabelOffsetX || 0;
-  const yOffsetY = config.yAxisLabelOffsetY || 0;
-  
-  // 判断是否使用水平排列（仅对 yAxisTop 生效，其他位置根据 yAxisLabelVertical 决定）
-  const isYAxisTopPosition = config.yAxisLabelPosition === 'yAxisTop';
-  const isYLabelHorizontal = isYAxisTopPosition || !config.yAxisLabelVertical;
-  
-  // 计算Y轴标签的基础偏移，根据是否有箭头和文字方向来调整
-  const yAxisLabelBaseOffset = config.yAxisArrowStart ? -15 : 0;
-  
-  // 计算垂直排列时需要的额外偏移，防止和轴标签重叠
-  const verticalTextExtraOffset = config.yAxisLabelVertical ? -15 : 0;
-  
-  let yAxisLabelProps: any = {
-    value: config.yAxisLabel,
-    fill: config.axisColor,
-    fontSize: yLabelFontSize,
-    style: { fontFamily: config.fontFamily },
-  };
-
-  // Y轴标题水平基础偏移量（统一使用bottom位置的偏移量作为基准）
-  const yAxisLabelBaseDx = config.yAxisLabelVertical ? -25 : 15;
-
-  switch (config.yAxisLabelPosition) {
-    case 'top':
-      yAxisLabelProps = {
-        ...yAxisLabelProps,
-        position: 'insideTop',
-        angle: config.yAxisLabelVertical ? -90 : 0,
-        dy: yAxisLabelBaseOffset + (config.yAxisLabelVertical ? 0 : -5) + (config.yAxisLabelVertical ? yOffsetX : yOffsetY),
-        dx: yAxisLabelBaseDx + (config.yAxisLabelVertical ? yOffsetY : yOffsetX),
-        textAnchor: config.yAxisLabelVertical ? 'middle' : 'start',
-      };
-      break;
-    case 'center':
-      yAxisLabelProps = {
-        ...yAxisLabelProps,
-        position: 'insideLeft',
-        angle: config.yAxisLabelVertical ? -90 : 0,
-        dy: (config.yAxisLabelVertical ? 0 : 0) + (config.yAxisLabelVertical ? yOffsetX : yOffsetY),
-        dx: yAxisLabelBaseDx + (config.yAxisLabelVertical ? yOffsetY : yOffsetX),
-        textAnchor: 'middle',
-      };
-      break;
-    case 'bottom':
-      yAxisLabelProps = {
-        ...yAxisLabelProps,
-        position: 'insideBottomLeft',
-        angle: config.yAxisLabelVertical ? -90 : 0,
-        dy: (config.yAxisLabelVertical ? 0 : 5) + (config.yAxisLabelVertical ? yOffsetX : yOffsetY),
-        dx: yAxisLabelBaseDx + (config.yAxisLabelVertical ? yOffsetY : yOffsetX),
-        textAnchor: config.yAxisLabelVertical ? 'middle' : 'start',
-      };
-      break;
-    case 'yAxisTop':
-    default:
-      // Y轴顶部 - 在Y轴箭头上方，水平显示
-      yAxisLabelProps = {
-        ...yAxisLabelProps,
-        position: 'insideTop',
-        dy: (config.yAxisArrowStart ? -40 : -25) + (config.yAxisLabelVertical ? yOffsetX : yOffsetY),
-        dx: 20 + (config.yAxisLabelVertical ? yOffsetY : yOffsetX),
-        textAnchor: 'middle',
-        angle: 0,
-      };
-      break;
+  const [xTickFrom, xTickTo] = tickOffset('x');
+  const [yTickFrom, yTickTo] = tickOffset('y');
+  const markEditing = tool === 'select' || tool === 'line';
+  const marks = chart.marks.map(mark => visibleMark(mark, plot, scale));
+  const selectedMark = selectedLine === null ? null : marks[selectedLine];
+  const statisticGuides = new Map<number, Statistic[]>();
+  if (tool === 'line' && stats) {
+    const entries = Object.entries(stats) as [Statistic, number][];
+    for (const [key, value] of entries) {
+      if (scale.includes(value)) statisticGuides.set(value, [...(statisticGuides.get(value) ?? []), key]);
+    }
   }
-
 
   return (
-    <div className="w-full flex flex-col bg-white p-4 rounded-xl border border-slate-200 shadow-sm" style={{ height: '500px' }}>
-      <div className="mb-4 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          {config.showLabels && (
-            <>
-              <button
-                onClick={() => setIsDraggableMode(!isDraggableMode)}
-                className={`flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
-                  isDraggableMode 
-                    ? 'bg-indigo-100 text-indigo-700 border border-indigo-300' 
-                    : 'text-slate-600 bg-slate-100 hover:bg-slate-200'
-                }`}
-                title={isDraggableMode ? "关闭拖动模式" : "开启拖动模式调整标签位置"}
-              >
-                <Move className="w-4 h-4" />
-                拖动标签
-              </button>
-              {Object.keys(labelOffsets).length > 0 && (
-                <button
-                  onClick={resetLabelPositions}
-                  className="px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
-                  title="重置所有标签位置"
-                >
-                  重置位置
-                </button>
-              )}
-            </>
-          )}
-        </div>
-        <h2 className="text-xl font-bold text-slate-800" style={{ fontFamily: config.fontFamily }}>{config.title}</h2>
-        <button
-          onClick={handleExportPNG}
-          className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
-          title="导出为PNG图片"
-        >
-          <Download className="w-4 h-4" />
-          导出PNG
-        </button>
-      </div>
-      
-      <div className="flex-1 w-full h-full" ref={chartRef} style={{ fontFamily: config.fontFamily, minHeight: 0 }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart
-            data={data}
-            margin={{
-              top: config.legend ? 50 : 30,
-              right: config.xAxisLabelPosition === 'axisLabelRight' && !config.xAxisArrowEnd ? 60 : 30,
-              left: 20,
-              bottom: 25,
-            }}
-          >
-            <defs>
-              {/* 
-                refX=0 puts the attachment point at the base of the triangle.
-                orient="auto-start-reverse" allows the same marker to be used for start (pointing out) and end (pointing out).
-              */}
-              <marker 
-                id="arrow" 
-                viewBox="0 0 10 10" 
-                refX="0" 
-                refY="5" 
-                markerWidth="6" 
-                markerHeight="6" 
-                orient="auto-start-reverse"
-              >
-                <path d="M 0 0 L 10 5 L 0 10 z" fill={config.axisColor} />
-              </marker>
-            </defs>
-            
-            {config.grid && <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />}
-            
-            <XAxis 
-              dataKey="label" 
-              label={config.showXAxisLabel ? xAxisLabelProps : undefined} 
-              tick={{ 
-                fill: config.axisColor, 
-                fontSize: xTickFontSize,
-                dy: config.xAxisTickLabelDistance + (config.xAxisTickType === 'outside' ? 0 : config.xAxisTickType === 'inside' ? -config.xAxisTickSize : -config.xAxisTickSize / 2)
-              }}
-              interval={config.xAxisTickInterval}
-              minTickGap={8}
-              tickLine={{ 
-                stroke: config.axisColor,
-                ...(config.xAxisTickType === 'inside' ? { transform: `translate(0, -${config.xAxisTickSize})` } : {}),
-                ...(config.xAxisTickType === 'cross' ? { transform: `translate(0, -${config.xAxisTickSize / 2})` } : {})
-              }}
-              tickSize={config.xAxisTickType === 'cross' ? config.xAxisTickSize * 2 : config.xAxisTickSize}
-              axisLine={{ 
-                stroke: config.axisColor, 
-                markerEnd: config.xAxisArrowEnd ? 'url(#arrow)' : undefined,
-                markerStart: config.xAxisArrowStart ? 'url(#arrow)' : undefined
-              }}
-              padding={xAxisPadding}
-            />
-            
-            <YAxis 
-              label={config.showYAxisLabel ? yAxisLabelProps : undefined} 
-              tick={{ 
-                fill: config.axisColor, 
-                fontSize: yTickFontSize,
-                dx: -(config.yAxisTickLabelDistance + (config.yAxisTickType === 'outside' ? 0 : config.yAxisTickType === 'inside' ? config.yAxisTickSize : config.yAxisTickSize / 2))
-              }}
-              tickCount={config.yAxisTickInterval > 0 ? undefined : (config.yAxisTickCount || 5)}
-              interval={config.yAxisTickInterval > 0 ? config.yAxisTickInterval : undefined}
-              tickLine={{ 
-                stroke: config.axisColor,
-                ...(config.yAxisTickType === 'inside' ? { transform: `translate(${config.yAxisTickSize}, 0)` } : {}),
-                ...(config.yAxisTickType === 'cross' ? { transform: `translate(${config.yAxisTickSize / 2}, 0)` } : {})
-              }}
-              tickSize={config.yAxisTickType === 'cross' ? config.yAxisTickSize * 2 : config.yAxisTickSize}
-              axisLine={{ 
-                stroke: config.axisColor, 
-                markerEnd: config.yAxisArrowStart ? 'url(#arrow)' : undefined,
-                markerStart: config.yAxisArrowEnd ? 'url(#arrow)' : undefined
-              }}
-              padding={yAxisPadding}
-              domain={[
-                config.yAxisStartZero ? 0 : (config.yAxisMin === 'auto' || config.yAxisMin === '' ? 'dataMin' : parseFloat(config.yAxisMin)),
-                config.yAxisMax === 'auto' || config.yAxisMax === '' ? 'dataMax' : parseFloat(config.yAxisMax)
-              ]}
-              allowDataOverflow={false}
-            />
-            
-            <Tooltip 
-              contentStyle={{ backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-            />
-            
-            {config.legend && <Legend verticalAlign="top" height={36}/>}
-            
-            {series.map((s) => (
-              <Line
-                key={s.dataKey}
-                type={config.smooth ? "monotone" : "linear"}
-                dataKey={s.dataKey}
-                name={s.name}
-                stroke={s.color}
-                strokeWidth={config.strokeWidth}
-                activeDot={{ r: (config.dotSize || 4) + 4 }}
-                dot={config.dots ? (props: any) => (
-                  <CustomDot
-                    cx={props.cx}
-                    cy={props.cy}
-                    size={config.dotSize || 4}
-                    shape={config.dotShape || 'circle'}
-                    fill={config.dotFilled ? s.color : '#fff'}
-                    stroke={s.color}
-                    strokeWidth={config.dotFilled ? 0 : 2}
-                  />
-                ) : false}
-                label={(config.showLabels || isDraggableMode) ? (props: any) => {
-                  const labelKey = `${s.dataKey}-${props.index}`;
-                  const offset = labelOffsets[labelKey] || { dx: 0, dy: 0 };
-                  // 应用整体偏移量
-                  const totalOffset = {
-                    dx: offset.dx + (config.labelOffsetX || 0),
-                    dy: offset.dy + (config.labelOffsetY || 0)
-                  };
-                  return (
-                    <DraggableLabel
-                      {...props}
-                      fill={s.color}
-                      labelKey={labelKey}
-                      offset={totalOffset}
-                      onDrag={handleLabelDrag}
-                      isDraggable={isDraggableMode}
-                      fontSize={config.labelFontSize}
-                      distance={config.labelDistance}
-                      alwaysShow={isDraggableMode}
-                    />
-                  );
-                } : false}
-              />
-            ))}
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-    </div>
+    <svg ref={svgRef} className={`chart-sheet tool-${tool}`} viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+      role={tool === 'preview' ? undefined : 'group'} aria-label={tool === 'preview' ? undefined : '统计图画布'}
+      aria-hidden={tool === 'preview' || undefined} fontFamily={FONT}
+      onPointerDown={startGesture} onPointerMove={event => moveGesture(event)}
+      onPointerUp={finishGesture} onPointerCancel={cancelGesture} onLostPointerCapture={cancelGesture}>
+      <rect width={WIDTH} height={HEIGHT} fill="#fff" data-paper="" />
+      {chartText('title', (plot.left + plot.right) / 2, 63, '图表标题', { width: 440, max: 27 })}
+      {scale.ticks.map(value => {
+        const y = scale.y(value);
+        return (
+          <g key={value} pointerEvents="none">
+            {style.grid && <line x1={plot.left} y1={y} x2={plot.right} y2={y} stroke="#e2e7f1" />}
+            {yAxis.tickLength > 0 && <line x1={plot.left - yTickFrom} x2={plot.left - yTickTo} y1={y} y2={y}
+              stroke={yAxis.color} data-axis-tick="y" data-tick-value={value} />}
+            {yAxis.showValues && <text x={plot.left - yTickTo - 8} y={y + yTickSize / 3} textAnchor="end"
+              fontSize={yTickSize} data-custom-size={yAxis.tickMode !== 'auto' ? '' : undefined} fill="#4e5b73">{formatValue(value)}</text>}
+          </g>
+        );
+      })}
+      {chart.kind === 'bar' && dataGraphics}
+      <g pointerEvents="none">
+        <g data-axis="x"><StyledLine start={{ x: plot.left, y: zero }} end={xEnd}
+          kind={xAxis.line} color={xAxis.color} width={xAxis.width} /></g>
+        <g data-axis="y"><StyledLine start={{ x: plot.left, y: plot.bottom }} end={yEnd}
+          kind={yAxis.line} color={yAxis.color} width={yAxis.width} /></g>
+      </g>
+      {tool === 'select' && (
+        <g data-editor-only="" className="axis-targets">
+          <line x1={plot.left} y1={zero} x2={xEnd.x} y2={zero} data-axis-target="x" />
+          <line x1={plot.left} y1={plot.bottom} x2={plot.left} y2={yEnd.y} data-axis-target="y" />
+        </g>
+      )}
+      {style.showOrigin && (
+        <text data-origin="" x={plot.left - yTickTo - 8} y={zero + yTickSize / 3} textAnchor="end"
+          fontSize={yTickSize} data-custom-size={yAxis.tickMode !== 'auto' ? '' : undefined} fill="#4e5b73">0</text>
+      )}
+      {chart.categories.map((_, index) => {
+        if (index % xTickEvery !== 0) return null;
+        const x = categoryX(index, count, plot);
+        return (
+          <g key={index}>
+            {xAxis.tickLength > 0 && <line x1={x} y1={zero + xTickFrom} x2={x} y2={zero + xTickTo}
+              stroke={xAxis.color} data-axis-tick="x" />}
+            {xAxis.showValues &&
+              chartText(index, x, plot.bottom + (angledCategories ? Math.max(18, xTickTo + 12) : Math.max(28, xTickTo + 18)), '类别', {
+                width: 100, maxWidth: angledCategories ? 44 : Math.max(8, categoryBand - 4),
+                anchor: angledCategories ? 'end' : 'middle', rotation: angledCategories ? -60 : 0,
+              })}
+          </g>
+        );
+      })}
+      {chart.kind === 'line' && dataGraphics}
+      {(style.legend === true || style.legend === 'auto' && chart.series.length > 1) && (
+        <g transform={`translate(${legendLeft} ${legendTop})`} aria-label="图例">
+          {chart.series.slice(0, legendLimit).map((series, index) => {
+            const x = index % legendColumns * 92;
+            const y = 8 + Math.floor(index / legendColumns) * 16;
+            const label = index === legendLimit - 1 && chart.series.length > legendLimit
+              ? `… +${chart.series.length - index}` : shorten(series.name, 5);
+            return (
+              <g key={index}>
+                <rect x={x} y={y - 9} width="12" height="7" rx="2" fill={series.color} />
+                <text x={x + 17} y={y - 1} fontSize="12" fill="#485861">{label}</text>
+              </g>
+            );
+          })}
+        </g>
+      )}
+      {xAxis.showLabel && chartText('xLabel', xLabel.x, xLabel.y, '横轴标题', { anchor: xTitle.anchor, max: 25 })}
+      {yAxis.showLabel && chartText('yLabel', yLabel.x, yLabel.y, '纵轴标题', { anchor: yTitle.anchor, rotation: yTitle.rotation, max: 25 })}
+      {statisticGuides.size > 0 && (
+        <g data-editor-only="" className="statistic-guides">
+          {[...statisticGuides].map(([value, keys]) => {
+            const y = scale.y(value);
+            const label = keys.map(key => STATISTIC_LABELS[key]).join(' / ') + ' ' + formatValue(value);
+            return (
+              <g key={value} data-stat={keys[0]} role="button" tabIndex={0} aria-label={`添加${label}参考线`}
+                onKeyDown={event => {
+                  if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onAddStatistic(keys[0]); }
+                }}>
+                <line x1={plot.left} x2={plot.right} y1={y} y2={y} stroke="#7688d4" strokeDasharray="5 5" strokeOpacity=".7" />
+                <line x1={plot.left} x2={plot.right} y1={y} y2={y} stroke="transparent" strokeWidth="12" />
+                <text x={plot.right} y={y - 5} textAnchor="end" fontSize="12" fill="#465a9f"
+                  stroke="#fff" strokeWidth="4" paintOrder="stroke">{label}</text>
+              </g>
+            );
+          })}
+        </g>
+      )}
+      {marks.map((mark, index) => {
+        if (!mark) return null;
+        const canSelect = (tool === 'select' || (markEditing && mark.type === 'line')) &&
+          !(gesture.current?.type === 'draw' && index === chart.marks.length - 1);
+        const selected = canSelect && selectedLine === index;
+        const path = markPath(mark.points);
+        return (
+          <g key={index} className="chart-mark" data-mark-type={mark.type}>
+            {selected && <path d={path} stroke="#6983ef" strokeWidth={(mark.width ?? 3.5) + 7} strokeOpacity=".28"
+              strokeLinecap="round" fill="none" pointerEvents="none" data-editor-only="" />}
+            <g pointerEvents="none" opacity={mark.opacity}>
+              {mark.type === 'line' ? <StyledLine start={mark.points[0]} end={mark.points[1]} kind={mark.lineKind ?? 'solid'}
+                color={mark.color} width={mark.width ?? 3.5} arrows={mark.arrows} /> : <path d={path} fill="none" stroke={mark.color}
+                strokeWidth={mark.width ?? 3.5} strokeLinecap="round" strokeLinejoin="round" />}
+            </g>
+            {(canSelect || eraseMarks) && <path d={path} fill="none" stroke="transparent"
+              strokeWidth={Math.max(14, (mark.width ?? 3.5) + 9)} strokeLinecap="round" strokeLinejoin="round"
+              className={canSelect ? 'line-hit' : undefined} role={canSelect ? 'button' : undefined}
+              tabIndex={canSelect ? 0 : undefined} aria-label={canSelect ? `选择线条 ${index + 1}` : undefined}
+              onFocus={canSelect ? () => onSelect({ kind: 'mark', index }) : undefined} data-mark={index} data-editor-only="" />}
+          </g>
+        );
+      })}
+      {chart.notes.map(note => chartText(note.id, note.position.x, note.position.y, '文字标注', { anchor: 'start', width: 280, max: 90 }))}
+      <g data-editor-only="">
+        {tool === 'select' && <circle cx={plot.left} cy={zero} r={6} className="axis-handle plot-handle" data-axis-target="both">
+          <title>拖动原点移动坐标系</title>
+        </circle>}
+        {tool === 'select' && ([['x', xEnd], ['y', yEnd]] as const).map(([axis, end]) => (
+          <circle key={axis} cx={end.x} cy={end.y} r={6} className={`axis-handle handle-${axis}`}
+            data-axis-end={axis}><title>拖动调整{axis === 'x' ? '横轴' : '纵轴'}长度</title></circle>
+        ))}
+        {markEditing && selectedMark?.type === 'line' &&
+          selectedMark.points.map((point, index) => (
+            <circle key={index} cx={point.x} cy={point.y} r={7} className="line-handle"
+              data-mark={selectedLine} data-endpoint={index}><title>{index === 0 ? '起点' : '终点'}</title></circle>
+          ))}
+        <g stroke="#526fea" strokeDasharray="5 5" strokeWidth="1" pointerEvents="none" className="alignment-guides">
+          {guides.x !== undefined && <line x1={guides.x} y1="0" x2={guides.x} y2={HEIGHT} />}
+          {guides.y !== undefined && <line x1="0" y1={guides.y} x2={WIDTH} y2={guides.y} />}
+        </g>
+      </g>
+    </svg>
   );
-};
+}
 
 export default ChartDisplay;
