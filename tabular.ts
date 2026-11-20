@@ -2,6 +2,27 @@ import { parseValue, SERIES_COLORS } from './chart';
 import type { PictographSymbol } from './pictographSymbols';
 import type { ChartDocument } from './types';
 
+const DELIMITERS = [',', '\t', ';'] as const;
+export type TableDelimiter = typeof DELIMITERS[number];
+export type TableFileEncoding = 'utf-8' | 'utf-16le' | 'utf-16be' | 'gb18030';
+
+export function decodeTableFile(buffer: ArrayBuffer) {
+  const bytes = new Uint8Array(buffer);
+  const utf8Bom = bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf;
+  const utf16leBom = bytes[0] === 0xff && bytes[1] === 0xfe;
+  const utf16beBom = bytes[0] === 0xfe && bytes[1] === 0xff;
+  const encodings: TableFileEncoding[] = utf8Bom ? ['utf-8'] : utf16leBom ? ['utf-16le'] : utf16beBom ? ['utf-16be'] : ['utf-8', 'gb18030'];
+  for (const encoding of encodings) {
+    try {
+      const text = new TextDecoder(encoding, { fatal: true }).decode(bytes);
+      if (!/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(text)) return { text, encoding };
+    } catch {
+      // A BOM is authoritative. For files without a BOM, try GB18030 after UTF-8.
+    }
+  }
+  throw new Error('无法识别表格文件的文本编码。请另存为 UTF-8 后重新导入。');
+}
+
 function parseRows(input: string, delimiter: string) {
   const rows: string[][] = [];
   let row: string[] = [];
@@ -47,19 +68,56 @@ function parseRows(input: string, delimiter: string) {
   return rows;
 }
 
-function detectDelimiter(input: string) {
-  const firstRow = input.match(/^(?:"(?:[^"]|"")*"|[^"\r\n])*/)?.[0] ?? '';
-  const unquoted = firstRow.replace(/"(?:[^"]|"")*"/g, '');
-  return [',', '\t', ';'].reduce((best, next) => (
-    unquoted.split(next).length > unquoted.split(best).length ? next : best
-  ));
+function tableRows(input: string, row: number, column: number, options: {
+  delimiter?: TableDelimiter; preferred?: TableDelimiter; wholeTable?: boolean;
+}): { delimiter: TableDelimiter; rows: string[][] } {
+  if (options.delimiter) return { delimiter: options.delimiter, rows: parseRows(input, options.delimiter) };
+
+  const candidates = DELIMITERS.flatMap(delimiter => {
+    try {
+      const rows = parseRows(input, delimiter);
+      const filled = rows.filter(cells => cells.length > 1 || cells.some(Boolean));
+      const header = options.wholeTable ? filled[0] : undefined;
+      const body = header ? filled.slice(1) : filled;
+      const dataSeparators = body.some(cells => cells.length > 1);
+      const columnCounts = new Map<number, number>();
+      for (const cells of filled) columnCounts.set(cells.length, (columnCounts.get(cells.length) ?? 0) + 1);
+      let matchingRows = 0;
+      for (const occurrences of columnCounts.values()) matchingRows = Math.max(matchingRows, occurrences);
+      const consistency = matchingRows / Math.max(1, filled.length);
+      const validValues = rows.every((cells, i) => cells.every((cell, j) => {
+        if (options.wholeTable ? cells === header || j === 0 : row + i === 0 || column + j === 0) return true;
+        try { parseValue(cell); return true; } catch { return false; }
+      }));
+      return [{ delimiter, rows, hasSeparator: filled.some(cells => cells.length > 1), hasHeaderSeparator: (header?.length ?? 0) > 1,
+        dataSeparators, consistency, validValues }];
+    } catch {
+      return [];
+    }
+  });
+
+  const withSeparators = candidates.filter(item => item.hasSeparator);
+  const preferred = withSeparators.find(item => item.delimiter === options.preferred);
+  if (preferred && (preferred.delimiter === '\t' || withSeparators.length === 1 ||
+    preferred.hasHeaderSeparator && preferred.dataSeparators && preferred.consistency === 1 && preferred.validValues)) return preferred;
+  if (!withSeparators.length) return { delimiter: ',', rows: parseRows(input, ',') };
+  const inData = withSeparators.filter(item => item.dataSeparators);
+  const ranked = inData.length ? inData : withSeparators;
+  const valid = ranked.filter(item => item.validValues);
+  const best = (valid.length ? valid : ranked).sort((a, b) => b.consistency - a.consistency);
+  if (best.length > 1 && best[0].consistency === best[1].consistency) {
+    throw new Error(options.wholeTable ? '检测到多种可能的分隔符，请选择表格分隔符后预览。'
+      : '粘贴区域的分隔符不明确。请使用制表符分隔，或在整表导入中选择分隔符。');
+  }
+  return best[0];
 }
 
 type TableData = Pick<ChartDocument, 'categories' | 'series' | 'xLabel' | 'yLabel'>;
 
-export function importTable(text: string): TableData {
+export function previewTable(text: string, options: { delimiter?: TableDelimiter; preferred?: TableDelimiter } = {}) {
   const input = text.replace(/^\uFEFF/, '').replace(/^(?: *\r?\n)+/, '');
-  const [headers, ...rows] = parseRows(input, detectDelimiter(input)).filter(row => row.length > 1 || row.some(Boolean));
+  const parsed = tableRows(input, 0, 0, { ...options, wholeTable: true });
+  const [headers, ...rows] = parsed.rows.filter(row => row.length > 1 || row.some(Boolean));
   if (!headers || rows.length === 0) throw new Error('请提供一行表头和至少一行数据。');
 
   let columns = headers.length;
@@ -79,36 +137,52 @@ export function importTable(text: string): TableData {
     }));
 
   if (!series.length) throw new Error('第一列填写类别，后面的列填写数值。');
-  return {
-    categories: rows.map((row, i) => row[0] || `类别 ${i + 1}`),
+  const data: TableData = {
+    categories: rows.map(row => row[0]),
     series,
     xLabel: headers[0] || '类别',
     yLabel: series.length === 1 ? series[0].name : '数量',
   };
+  const unevenRows = rows.filter(row => row.length !== headers.length).length;
+  return { data, delimiter: parsed.delimiter, unevenRows };
+}
+
+export function importTable(text: string): TableData {
+  return previewTable(text).data;
+}
+
+function matchPrevious<T>(items: T[], name: (item: T) => string) {
+  const byName = new Map<string, T[]>();
+  for (let index = items.length - 1; index >= 0; index--) {
+    const item = items[index];
+    const key = name(item);
+    const matches = byName.get(key);
+    if (matches) matches.push(item);
+    else byName.set(key, [item]);
+  }
+  return (key: string) => byName.get(key)?.pop();
 }
 
 export function replaceTable(chart: ChartDocument, data: TableData): ChartDocument {
-  const previousSeries = [...chart.series];
+  const previousSeries = matchPrevious(chart.series, item => item.name);
   const series = data.series.map(item => {
-    const index = previousSeries.findIndex(previous => previous.name === item.name);
-    if (index < 0) return item;
-    const [previous] = previousSeries.splice(index, 1);
-    return { ...previous, values: item.values };
+    const previous = previousSeries(item.name);
+    return previous ? { ...previous, values: item.values } : item;
   });
   const textStyles = { ...chart.textStyles };
   chart.categories.forEach((_, index) => delete textStyles[index]);
-  const previousCategories = chart.categories.map((name, index) => ({ name, index }));
+  const previousCategory = matchPrevious(chart.categories.map((_, index) => index), index => chart.categories[index]);
+  const previouslyHidden = new Set(chart.hiddenCategoryLabels);
   const hiddenCategoryLabels: number[] = [];
   const pieColors = chart.pieColors ? data.categories.map(() => null as string | null) : undefined;
   const pictographSymbols = chart.pictographSymbols ? data.categories.map<PictographSymbol | null>(() => null) : undefined;
   data.categories.forEach((name, index) => {
-    const match = previousCategories.findIndex(previous => previous.name === name);
-    if (match < 0) return;
-    const [previous] = previousCategories.splice(match, 1);
-    if (chart.textStyles[previous.index]) textStyles[index] = chart.textStyles[previous.index];
-    if (chart.hiddenCategoryLabels?.includes(previous.index)) hiddenCategoryLabels.push(index);
-    if (pieColors) pieColors[index] = chart.pieColors[previous.index] ?? null;
-    if (pictographSymbols) pictographSymbols[index] = chart.pictographSymbols[previous.index] ?? null;
+    const previous = previousCategory(name);
+    if (previous === undefined) return;
+    if (chart.textStyles[previous]) textStyles[index] = chart.textStyles[previous];
+    if (previouslyHidden.has(previous)) hiddenCategoryLabels.push(index);
+    if (pieColors) pieColors[index] = chart.pieColors[previous] ?? null;
+    if (pictographSymbols) pictographSymbols[index] = chart.pictographSymbols[previous] ?? null;
   });
   return { ...chart, ...data, series, textStyles, hiddenCategoryLabels, pieColors, pictographSymbols,
     pieSeries: undefined, barSeries: undefined, pictographSeries: undefined, scaleExtent: null };
@@ -116,7 +190,7 @@ export function replaceTable(chart: ChartDocument, data: TableData): ChartDocume
 
 export function parseTableBlock(text: string, row: number, column: number) {
   const input = text.replace(/^\uFEFF/, '');
-  return parseRows(input, detectDelimiter(input)).map((cells, i) => cells.map((cell, j) => {
+  return tableRows(input, row, column, { preferred: '\t' }).rows.map((cells, i) => cells.map((cell, j) => {
     if (row + i === 0 || column + j === 0) return cell;
     try {
       return parseValue(cell);
@@ -156,6 +230,6 @@ export function exportTable(document: ChartDocument) {
   ];
   return rows.map(row => row.map(value => {
     const text = String(value);
-    return /[,"\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+    return /[,;\t"\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
   }).join(',')).join('\r\n');
 }

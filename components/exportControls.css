@@ -1,0 +1,38 @@
+.chart-export-trigger { anchor-name: --chart-export-trigger; }
+.chart-export-trigger[aria-disabled="true"] { cursor: default; opacity: .65; }
+
+.chart-export-menu {
+  position: fixed;
+  inset: 4.5rem max(9px, calc((100vw - 1404px) / 2)) auto auto;
+  width: min(248px, calc(100vw - 18px));
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  color: #202a43;
+  box-shadow: 0 6px 20px #26386026;
+}
+
+@supports (top: anchor(bottom)) {
+  .chart-export-menu {
+    position-anchor: --chart-export-trigger;
+    inset: calc(anchor(bottom) + 7px) anchor(right) auto auto;
+  }
+}
+
+.chart-export-title {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 650;
+}
+.chart-export-range { margin: 4px 0 10px; color: var(--muted); font-size: 12px; }
+.chart-export-formats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.header-actions .chart-export-formats .button { min-height: 34px; padding-inline: 8px; }
+
+@media (max-width: 420px) {
+  .chart-export-arrow { display: none; }
+}

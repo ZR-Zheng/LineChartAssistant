@@ -2,9 +2,9 @@ import type { ReactNode } from 'react';
 import { arrowOffset } from '../alignment';
 import { clamp, formatValue, getSeriesStyle, TEXT_FONTS } from '../chart';
 import { pictographLayout, pictographSymbolAt, resizePictographTable, setPictographCategoryShare } from '../pictograph';
-import { PICTOGRAPH_SYMBOLS } from '../pictographSymbols';
-import type { ChartDocument, ChartEdit, Datum, PictographStyle, Selection } from '../types';
-import PictographIcon, { PICTOGRAPH_ICON_LICENSES } from './PictographIcon';
+import type { ChartDocument, ChartEdit, DataHighlight, Datum, PictographStyle, Selection } from '../types';
+import PictographIcon from './PictographIcon';
+import type { CanvasObjectProps } from './canvasInteraction';
 
 function Symbol({ name, color, size, x, y, fraction = 1, vertical, outline, colored }: {
   name: PictographStyle['symbol']; color: string; size: number; x: number; y: number;
@@ -22,10 +22,11 @@ function Symbol({ name, color, size, x, y, fraction = 1, vertical, outline, colo
   );
 }
 
-export default function PictographGraphic({ chart, selection, editable, eraseData, onSelect, onEdit, onEditLegend, renderDatum, renderCategory }: {
-  chart: ChartDocument; selection: Selection | null; editable: boolean; eraseData: boolean;
+export default function PictographGraphic({ chart, selection, highlight, editable, eraseData, onSelect, onEdit, onEditLegend, canvasObject, renderDatum, renderCategory }: {
+  chart: ChartDocument; selection: Selection | null; highlight?: DataHighlight | null; editable: boolean; eraseData: boolean;
   onSelect?: (selection: Selection | null) => void; onEdit?: ChartEdit;
   onEditLegend?: () => void;
+  canvasObject: CanvasObjectProps;
   renderDatum: (datum: Datum, value: number | null, children: ReactNode) => ReactNode;
   renderCategory: (index: number, x: number, y: number, maxWidth: number, anchor: 'middle' | 'end', size: number, cellHeight?: number) => ReactNode;
 }) {
@@ -34,10 +35,6 @@ export default function PictographGraphic({ chart, selection, editable, eraseDat
   const legendSelected = editable && selection?.kind === 'pictograph-legend';
   const colored = style.colorMode === 'color';
   const symbols = chart.categories.map((_, index) => pictographSymbolAt(chart, index));
-  const licenses = [
-    colored && symbols.some(name => PICTOGRAPH_SYMBOLS[name][1]) && PICTOGRAPH_ICON_LICENSES.fluent,
-    symbols.some(name => !PICTOGRAPH_SYMBOLS[name][1]) && PICTOGRAPH_ICON_LICENSES.noto,
-  ].filter(Boolean).join('\n\n');
   const showValues = getSeriesStyle(series, chart.style).showLabels;
   const { top, bottom, left, right, symbolLeft } = plot;
   const thickness = (vertical ? right - left : bottom - top) / chart.categories.length;
@@ -61,7 +58,6 @@ export default function PictographGraphic({ chart, selection, editable, eraseDat
 
   return (
     <g aria-label="象形图">
-      {licenses && <metadata>{licenses}</metadata>}
       {style.frame && <g pointerEvents="none">
         <rect x={left} y={table.top} width={table.width} height={table.height} fill="none" stroke={frameColor} data-pictograph-table="" />
         <line {...divider} stroke={frameColor} data-pictograph-category-divider="" />
@@ -76,6 +72,7 @@ export default function PictographGraphic({ chart, selection, editable, eraseDat
         const fraction = tooMany ? 0 : count - filled;
         const datum = { series: seriesIndex, index };
         const active = selected?.series === seriesIndex && selected.index === index;
+        const highlighted = highlight?.series === seriesIndex && (highlight.index === undefined || highlight.index === index);
         const hit = vertical ? { x: edge, y: top - 22, width: thickness, height: bottom - top + 22 }
           : { x: left, y: edge, width: right - left, height: thickness };
         const countText = value === null ? '—' : formatValue(value);
@@ -98,6 +95,8 @@ export default function PictographGraphic({ chart, selection, editable, eraseDat
               stroke={style.frame || style.frameColor ? frameColor : '#e8ecf3'} pointerEvents="none" />}
             {renderDatum(datum, value, <>
               {(editable || eraseData) && <rect {...hit} rx={4} fill={active ? '#ecf1ff' : 'transparent'} data-editor-only="" />}
+              {highlighted && <rect {...hit} rx={4} fill="#ecf1ff" stroke="#506fe7" strokeWidth="2" opacity="0.8"
+                pointerEvents="none" data-editor-only="" data-value-highlight="" />}
               {Array.from({ length: cells }, (_, cell) => (
                 <g key={cell}>
                   <Symbol name={name} outline={style.outline} color={series.color} colored={colored} size={size} vertical={vertical}
@@ -120,11 +119,11 @@ export default function PictographGraphic({ chart, selection, editable, eraseDat
       })}
       {style.showKey && <g aria-label={`图符图例：${legend.label}`} data-pictograph-legend=""
         transform={`translate(${legend.position.x} ${legend.position.y})`}
-        role={editable ? 'button' : undefined} tabIndex={editable ? 0 : undefined}
-        aria-keyshortcuts={editable ? 'Enter ArrowLeft ArrowRight ArrowUp ArrowDown' : undefined}
+        role={editable ? 'button' : undefined} {...(editable ? canvasObject('pictograph:legend') : {})}
+        aria-keyshortcuts={editable ? 'Enter Alt+ArrowLeft Alt+ArrowRight Alt+ArrowUp Alt+ArrowDown' : undefined}
         onFocus={editable ? () => onSelect?.({ kind: 'pictograph-legend' }) : undefined}
         onKeyDown={editable ? event => {
-          if (event.key === 'Enter') {
+          if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
             onEditLegend?.();
             return;
@@ -149,7 +148,7 @@ export default function PictographGraphic({ chart, selection, editable, eraseDat
       {footerMessage && <text x={left} y={warningY} fontSize={15} fill="#84591d">{footerMessage}</text>}
       {style.frame && editable && table.category.min < table.category.max && (
         <g className="pictograph-category-handle" data-pictograph-category-resize="" data-editor-only=""
-          role="slider" tabIndex={0} aria-label={vertical ? '调整类别行占比' : '调整类别列占比'}
+          role="slider" {...canvasObject('pictograph:category', true)} aria-label={vertical ? '调整类别行占比' : '调整类别列占比'}
           aria-orientation={vertical ? 'vertical' : 'horizontal'}
           aria-valuemin={table.category.min} aria-valuemax={table.category.max} aria-valuenow={Math.round(table.category.percent * 10) / 10}
           onFocus={() => onSelect?.(null)} onKeyDown={event => {
@@ -157,8 +156,8 @@ export default function PictographGraphic({ chart, selection, editable, eraseDat
             const offset = arrowOffset(event.key, event.shiftKey);
             const change = offset ? vertical ? -offset.y : offset.x : 0;
             const next = event.key === 'Home' ? min : event.key === 'End' ? max : percent + change;
+            if (offset || event.key === 'Home' || event.key === 'End') event.preventDefault();
             if (next === percent) return;
-            event.preventDefault();
             onEdit?.(current => setPictographCategoryShare(current, next));
           }}>
           <title>拖动调整类别单元格占比</title>
@@ -168,9 +167,8 @@ export default function PictographGraphic({ chart, selection, editable, eraseDat
         </g>
       )}
       {style.frame && editable && (
-        <rect x={right - 5} y={table.bottom - 5} width={10} height={10} rx={2}
-          className="axis-handle pictograph-table-handle" data-pictograph-table-resize="" data-editor-only=""
-          role="button" tabIndex={0} aria-label="调整表格大小" aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown"
+        <g className="pictograph-table-handle" data-pictograph-table-resize="" data-editor-only=""
+          role="button" {...canvasObject('pictograph:table', true)} aria-label="调整表格大小"
           onFocus={() => onSelect?.(null)} onKeyDown={event => {
             const offset = arrowOffset(event.key, event.shiftKey);
             if (!offset) return;
@@ -178,7 +176,8 @@ export default function PictographGraphic({ chart, selection, editable, eraseDat
             onEdit?.(current => resizePictographTable(current, { width: table.width + offset.x, height: table.height + offset.y }));
           }}>
           <title>拖动调整表格宽度和高度</title>
-        </rect>
+          <rect x={right - 5} y={table.bottom - 5} width={10} height={10} rx={2} className="axis-handle" />
+        </g>
       )}
     </g>
   );

@@ -7,17 +7,24 @@ import PictographIcon from './PictographIcon';
 
 const symbols = Object.entries(PICTOGRAPH_SYMBOLS);
 
-export default function PictographSymbolField({ label, value, color, outline, mode, onChange, onModeChange, onReset }: {
-  label: string; value: PictographSymbol; color: string; outline: boolean; mode: PictographStyle['colorMode'];
-  onChange: (value: PictographSymbol) => void; onModeChange: (mode: PictographStyle['colorMode']) => void; onReset?: () => void;
+type ColorMode = PictographStyle['colorMode'];
+
+export default function PictographSymbolField({ label, value, color, outline, mode, onChange, onModeChange, onReset,
+  resetLabel = '恢复默认图符' }: {
+  label: string; value: PictographSymbol | null; color: string; outline: boolean; mode: ColorMode;
+  onChange: (value: PictographSymbol, mode: ColorMode) => void; onModeChange: (mode: ColorMode) => void;
+  onReset?: () => void; resetLabel?: string;
 }) {
   const id = useId();
   const trigger = useRef<HTMLButtonElement>(null);
   const popup = useRef<HTMLDivElement>(null);
-  const [group, setGroup] = useState(PICTOGRAPH_SYMBOLS[value][2]);
+  const selected = value === null ? null : PICTOGRAPH_SYMBOLS[value];
+  const [group, setGroup] = useState(selected?.[2] ?? 'shapes');
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const colored = mode === 'color';
+  const [draftMode, setDraftMode] = useState(mode);
+  const previewMode = selected ? mode : draftMode;
+  const colored = previewMode === 'color';
   const search = query.trim().toLowerCase();
   const choices = symbols.filter(([key, [name, , category]]) => search ? name.includes(search) || key.toLowerCase().includes(search) : category === group);
 
@@ -56,27 +63,39 @@ export default function PictographSymbolField({ label, value, color, outline, mo
     popup.current.hidePopover();
     trigger.current.focus();
     if (symbol === null) onReset?.();
-    else if (symbol !== value) onChange(symbol);
+    else if (symbol !== value) onChange(symbol, previewMode);
+  }
+
+  function changeMode(next: ColorMode) {
+    if (next === previewMode) return;
+    if (selected) onModeChange(next);
+    else setDraftMode(next);
   }
 
   return (
     <div className="pictograph-symbol-field">
       <span>{label}</span>
       <button type="button" ref={trigger} className="button compact pictograph-symbol-trigger" popoverTarget={id}
-        aria-label={`${label}：${PICTOGRAPH_SYMBOLS[value][0]}`} title={PICTOGRAPH_SYMBOLS[value][0]}
+        aria-label={`${label}：${selected?.[0] ?? '选择图标'}`} title={selected?.[0]}
         onClick={() => {
-          setGroup(PICTOGRAPH_SYMBOLS[value][2]);
+          setGroup(selected?.[2] ?? 'shapes');
           setQuery('');
+          setDraftMode(mode);
         }}>
-        <PictographIcon name={value} color={color} outline={outline} colored={colored} size={24} />
+        {selected ? <PictographIcon name={value} color={color} outline={outline} colored={colored} size={24} /> : '选择图标'}
         <ChevronDown size={14} aria-hidden="true" />
       </button>
       <div id={id} ref={popup} popover="auto" className="pictograph-symbol-popover" aria-label={label}
         onToggle={event => setOpen(event.currentTarget.matches(':popover-open'))}>
         {open && <>
-          <div className="segmented" role="group" aria-label="图符配色">
-            <button type="button" aria-pressed={!colored} onClick={() => { if (colored) onModeChange('single'); }}>单色</button>
-            <button type="button" aria-pressed={colored} onClick={() => { if (!colored) onModeChange('color'); }}>彩色</button>
+          <div className="pictograph-symbol-actions">
+            <div className="segmented" role="group" aria-label="图符配色">
+              <button type="button" aria-pressed={!colored} onClick={() => changeMode('single')}>单色</button>
+              <button type="button" aria-pressed={colored} onClick={() => changeMode('color')}>彩色</button>
+            </div>
+            {onReset && <button type="button" className="button compact" onClick={() => select(null)}>
+              <RotateCcw size={15} /> {resetLabel}
+            </button>}
           </div>
           <input className="pictograph-symbol-search" type="search" aria-label="搜索图符" placeholder="搜索图符" value={query}
             onChange={event => setQuery(event.currentTarget.value)} />
@@ -94,8 +113,6 @@ export default function PictographSymbolField({ label, value, color, outline, mo
                 <PictographIcon name={key as PictographSymbol} color={color} outline={outline} colored={colored} size={27} />
               </button>
             ))}
-            {onReset && <button type="button" className="button icon-button" aria-label="恢复默认图符" title="恢复默认图符"
-              onClick={() => select(null)}><RotateCcw size={19} /></button>}
           </div>
         </>}
       </div>

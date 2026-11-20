@@ -1,7 +1,7 @@
 import type { PictographSymbol } from './pictographSymbols';
 
 export type ChartKind = 'line' | 'bar' | 'pie' | 'pictograph';
-export type Tool = 'line' | 'pen' | 'eraser' | 'select' | 'text';
+export type Tool = 'line' | 'pen' | 'eraser' | 'select' | 'text' | 'add-data';
 export type LineKind = 'solid' | 'dashed' | 'arrow';
 export type ArrowPlacement = 'start' | 'end' | 'both';
 export type AxisArrowhead = 'open' | 'outline' | 'filled';
@@ -13,6 +13,7 @@ export type TextTarget = 'title' | AxisLabel | NoteTarget | number;
 export type TitlePlacement = 'end' | 'center' | 'start';
 export type Statistic = 'max' | 'min' | 'mean';
 export type Datum = { series: number; index: number };
+export type DataHighlight = { series: number; index?: number };
 export type Selection =
   | { kind: 'mark'; index: number }
   | { kind: 'text'; target: TextTarget }
@@ -67,6 +68,7 @@ export interface SeriesStyle {
   showLabels: boolean;
   columnWidth: number;
   roundedColumns: boolean;
+  columnIcon?: { symbol: PictographSymbol; colorMode: PictographStyle['colorMode'] };
 }
 
 export interface Series {

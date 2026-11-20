@@ -125,7 +125,8 @@ function StylePresets({ style, onApply }: { style: ChartStyle; onApply: (style: 
 
   return (
     <details className="presets">
-      <summary>样式预设</summary>
+      <summary>全局样式预设</summary>
+      <p className="preset-scope">预设保存画布的全局样式。系列有独立样式时，该系列优先使用自己的设置。</p>
       <form className="preset-actions" onSubmit={add}>
         <input aria-label="预设名称" placeholder="预设名称" value={name} onChange={event => setName(event.target.value)} />
         <button className="button compact" disabled={!name.trim()}>保存</button>

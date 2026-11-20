@@ -2,7 +2,8 @@ import type { ReactNode } from 'react';
 import { clamp, estimateTextWidth, formatShare, formatValue, HEIGHT, isLightColor, pieColor, TEXT_FONTS, WIDTH } from '../chart';
 import { arrowOffset } from '../alignment';
 import { movePie, pieLayout, resetPieLegend } from '../pieLayout';
-import type { ChartDocument, ChartEdit, Datum, Point, Selection } from '../types';
+import type { ChartDocument, ChartEdit, DataHighlight, Datum, Point, Selection } from '../types';
+import type { CanvasObjectProps } from './canvasInteraction';
 
 const TURN = Math.PI * 2;
 
@@ -53,18 +54,19 @@ interface Props {
   chart: ChartDocument;
   layout: ReturnType<typeof pieLayout>;
   selection: Selection | null;
+  highlight?: DataHighlight | null;
   editable: boolean;
   onEdit?: ChartEdit;
   onSelect?: (selection: Selection | null) => void;
+  onEditObject?: (selection: Selection, trigger: SVGElement) => void;
+  canvasObject: CanvasObjectProps;
   renderDatum: (datum: Datum, value: number, children: ReactNode, share?: string) => ReactNode;
 }
 
-export default function PieGraphic({ chart, layout, selection, editable, onEdit, onSelect, renderDatum }: Props) {
+export default function PieGraphic({ chart, layout, selection, highlight, editable, onEdit, onSelect, onEditObject, canvasObject, renderDatum }: Props) {
   const { style, slices, center, showLabels, showLegend, legend } = layout;
   const seriesIndex = chart.pieSeries ?? 0;
-  if (!slices.length) return <text x={WIDTH / 2} y={264} textAnchor="middle" fill="#55637c" fontSize="17" data-editor-only="">
-    在数据表中输入正数，生成扇形图
-  </text>;
+  if (!slices.length) return null;
 
   const { radius, startAngle, holeRatio, clockwise, labelFontSize, labelMode, legendFontSize, legendMarkerSize } = style;
   const inner = radius * holeRatio;
@@ -85,6 +87,7 @@ export default function PieGraphic({ chart, layout, selection, editable, onEdit,
         const percentage = formatShare(share, style.percentageDigits);
         const arc = sectorPath(center, radius, inner, start, end, clockwise, at);
         const selected = selection?.kind === 'data' && selection.datum.index === index && selection.datum.series === seriesIndex;
+        const highlighted = highlight?.series === seriesIndex && (highlight.index === undefined || highlight.index === index);
         const both = labelMode === 'both';
         const number = formatValue(value);
         const firstLine = labelMode === 'value' ? number : percentage;
@@ -101,6 +104,7 @@ export default function PieGraphic({ chart, layout, selection, editable, onEdit,
         return renderDatum({ series: seriesIndex, index }, value, <>
           <path d={arc} fill={color} fillRule="evenodd" stroke={style.separatorColor} strokeWidth={style.separatorWidth} data-sector="" />
           {selected && <path d={arc} fill="none" stroke="#243869" strokeWidth="3" pointerEvents="none" data-editor-only="" />}
+          {highlighted && <path d={arc} fill="none" stroke="#506fe7" strokeWidth="5" pointerEvents="none" data-editor-only="" data-value-highlight="" />}
           {showLabels && spot && <text x={spot.x} y={spot.y - (both ? lineHeight / 2 : 0)}
             textAnchor="middle" dominantBaseline="central" pointerEvents="none" fill={style.labelColor ?? (isLightColor(color) ? '#26334c' : '#fff')}
             fontSize={labelFontSize} fontFamily={TEXT_FONTS[style.labelFont].family} fontWeight="650">
@@ -109,7 +113,7 @@ export default function PieGraphic({ chart, layout, selection, editable, onEdit,
         </>, percentage);
       })}
       {editable && <g data-pie-move="" data-editor-only="" transform={`translate(${center.x} ${center.y})`}
-        role="group" tabIndex={0} aria-label="移动扇形图" aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown"
+        role="button" {...canvasObject('pie:move', true)} aria-label="移动扇形图"
         onFocus={() => onSelect(null)} onKeyDown={event => {
           const offset = arrowOffset(event.key, event.shiftKey);
           if (!offset) return;
@@ -124,12 +128,13 @@ export default function PieGraphic({ chart, layout, selection, editable, onEdit,
         <path d="M -3 0 H 3 M 0 -3 V 3" stroke="#6279c8" strokeLinecap="round" pointerEvents="none" />
       </g>}
       {showLegend && <g data-pie-legend="" transform={`translate(${legendPosition.x} ${legendPosition.y})`}
-        aria-label="扇形图图例" role={editable ? 'button' : undefined} tabIndex={editable ? 0 : undefined}
+        aria-label="扇形图图例" role={editable ? 'button' : undefined} {...(editable ? canvasObject('pie:legend') : {})}
         onFocus={editable ? () => onSelect({ kind: 'pie-legend' }) : undefined}
         onKeyDown={editable ? event => {
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
             onSelect({ kind: 'pie-legend' });
+            onEditObject?.({ kind: 'pie-legend' }, event.currentTarget);
             return;
           }
           const offset = arrowOffset(event.key, event.shiftKey);
@@ -147,7 +152,7 @@ export default function PieGraphic({ chart, layout, selection, editable, onEdit,
           const middle = legendMarkerSize / 2;
           const color = pieColor(chart, index);
           return <g key={index}>
-            <title>{category}{detail ? ` · ${detail}` : ''}</title>
+            <title>{detail ? `${category} · ${detail}` : category}</title>
             {style.legendMarker === 'circle' ? <circle cx={middle} cy={y} r={middle} fill={color} />
               : style.legendMarker === 'line' ? <line x1="1" x2={legendMarkerSize - 1} y1={y} y2={y} stroke={color} strokeWidth="3" strokeLinecap="round" />
                 : <rect y={y - middle} width={legendMarkerSize} height={legendMarkerSize} rx="2" fill={color} />}

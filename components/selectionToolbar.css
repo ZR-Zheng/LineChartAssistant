@@ -1,0 +1,24 @@
+.drawing-toolbar.datum-toolbar { gap: 9px; padding: 6px 9px; }
+
+.datum-toolbar-group { display: flex; align-items: center; gap: 8px; }
+.datum-toolbar-group + .datum-toolbar-group { border-inline-start: 1px solid var(--border); padding-inline-start: 9px; }
+
+.datum-toolbar .text-toolbar-name {
+  display: block;
+  max-inline-size: clamp(80px, 16vw, 148px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.datum-toolbar label, .datum-toolbar .color-field, .datum-toolbar .pictograph-symbol-field { gap: 5px; }
+.datum-toolbar input[type="text"] { width: 60px; }
+.datum-toolbar input.toolbar-name-input { width: 82px; }
+.object-toolbar-field { display: flex; flex: none; align-items: center; gap: 5px; }
+.drawing-toolbar .object-toolbar-field input[aria-invalid="true"] { border-color: #b64942; background: #fff7f6; }
+.object-toolbar-error { color: #9b3733; font-size: 12px; white-space: nowrap; }
+.datum-toolbar .pictograph-symbol-field > span { color: var(--muted); font-size: 13px; }
+.datum-toolbar-group > .button.compact, .datum-toolbar .pictograph-symbol-trigger { gap: 5px; padding-inline: 7px; }
+
+.datum-toolbar-delete { margin-inline-start: auto; }
+.datum-toolbar .datum-delete-trigger { color: #9b3733; }
+.toolbar-strip-close { margin-inline: 4px; }

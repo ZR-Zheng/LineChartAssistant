@@ -1,6 +1,6 @@
 import {
   AlarmClock, Ambulance, Apple, Backpack, Banana, Bike, Bird, BookOpen, Bug, Bus, Cake, CarFront, Carrot, Cat, Cherry,
-  Circle, CircleDot, Citrus, Cloud, CloudLightning, CloudRain, Coffee, Cookie, CupSoda, Diamond, Dog, Droplet, Fish, Flower2,
+  Circle, Citrus, Cloud, CloudLightning, CloudRain, Coffee, Cookie, createLucideIcon, CupSoda, Diamond, Dog, Droplet, Fish, Flower2,
   Footprints, Gift, GraduationCap, Grape, Heart, House, IceCreamCone, Leaf, Lightbulb, Medal, Mountain, Notebook,
   Palette, PawPrint, Pencil, Pizza, Plane, Popcorn, Rabbit, Rainbow, Rocket, Ruler, Sandwich, School, Scissors, Ship, Shirt,
   ShoppingCart, Snail, Snowflake, Square, Star, Sun, Tractor, TrainFront, TreeDeciduous, TreePine, Triangle, Trophy, Truck,
@@ -14,6 +14,16 @@ export const SYMBOL_GROUPS = {
 } as const;
 
 type IconEntry = readonly [string, typeof Circle | null, keyof typeof SYMBOL_GROUPS];
+
+const Soccer = createLucideIcon('Soccer', [
+  ['circle', { cx: '12', cy: '12', r: '10', fill: '#fff', stroke: 'none', key: 'surface' }],
+  ...[0, 72, 144, 216, 288].map<['path', Record<string, string>]>(angle => ['path', {
+    d: 'M8.75 2.54 A10 10 0 0 1 15.25 2.54 L14.55 4.7 12 5.8 9.45 4.7 Z M12 5.8V7.8',
+    transform: `rotate(${angle} 12 12)`, fill: 'currentColor', strokeWidth: '0.9', key: `patch-${angle}`,
+  }]),
+  ['path', { d: 'M12 7.65 16.14 10.65 14.56 15.52 9.44 15.52 7.86 10.65 Z', fill: 'currentColor', stroke: 'none', key: 'center' }],
+  ['circle', { cx: '12', cy: '12', r: '10', strokeWidth: '1.2', key: 'outline' }],
+]);
 
 const FLUENT_PICTOGRAPH_SYMBOLS = {
   circle: ['圆形', Circle, 'shapes'],
@@ -39,7 +49,7 @@ const FLUENT_PICTOGRAPH_SYMBOLS = {
   shirt: ['衣服', Shirt, 'school'],
   cart: ['购物车', ShoppingCart, 'school'],
   ball: ['排球', Volleyball, 'sports'],
-  soccer: ['足球', CircleDot, 'sports'],
+  soccer: ['足球', Soccer, 'sports'],
   basketball: ['篮球', Circle, 'sports'],
   run: ['运动鞋', Footprints, 'sports'],
   trophy: ['奖杯', Trophy, 'sports'],

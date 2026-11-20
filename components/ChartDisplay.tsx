@@ -1,22 +1,28 @@
-import { useEffect, useRef, useState } from 'react';
-import type { KeyboardEvent, PointerEvent, ReactNode, RefObject } from 'react';
-import { AXIS_LENGTHS, axisTitleLayout, categoryX, chartSheetHeight, clamp, constrainPlotOffset, DEFAULT_AXIS_ARROWHEAD, DEFAULT_GROUP_WIDTH,
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { FocusEvent, KeyboardEvent, PointerEvent, ReactNode, RefObject } from 'react';
+import { AXIS_LENGTHS, axisTitleLayout, categoryX, chartDataWarnings, clamp, constrainPlotOffset, DEFAULT_AXIS_ARROWHEAD, DEFAULT_GROUP_WIDTH,
   displayedSeries, exerciseNoteLayout, FONT, formatValue, getPlot, getScale, getSeriesStyle, getTextStyle, hasChartAxes, HEIGHT,
   hideText, isLightColor, isNote, markPath, movePlot, removeNote, setChartValue, shorten,
   STATISTIC_LABELS, TEXT_FONTS, textValue, verticalAxisExtension, visibleMark, WIDTH } from '../chart';
 import type { Plot } from '../chart';
-import { NO_TARGETS, snapEndpoint, snapPoint, translateLine } from '../alignment';
+import { layoutSeriesLegend, LEGEND_FONT_SIZE, LEGEND_LINE_HEIGHT, placeValueLabels, spacedTickLabels, VALUE_FONT_SIZE } from '../chartPresentation';
+import { arrowOffset, NO_TARGETS, snapEndpoint, snapPoint, translateLine } from '../alignment';
 import type { Guides, SnapTargets } from '../alignment';
 import { movePie, pieLayout, pieMoveBounds, resetPieLegend } from '../pieLayout';
 import { pictographLayout, resetPictographLegend, resizePictographTable, setPictographCategoryShare } from '../pictograph';
-import type { ArrowPlacement, Axis, AxisLabel, ChartDocument, ChartEdit, Datum, EraseScope, LineKind, Mark, NoteTarget, Point,
+import type { ArrowPlacement, Axis, AxisLabel, ChartDocument, ChartEdit, DataHighlight, Datum, EraseScope, LineKind, Mark, NoteTarget, Point,
   Selection, SeriesStyle, Statistic, TextStyle, TextTarget, Tool } from '../types';
 import StyledLine from './StyledLine';
 import PieGraphic from './PieGraphic';
 import PictographGraphic from './PictographGraphic';
+import PictographIcon from './PictographIcon';
+import type { CanvasObjectProps } from './canvasInteraction';
+import './canvasInteraction.css';
 
 type Scale = ReturnType<typeof getScale>;
 type MovableText = AxisLabel | NoteTarget;
+type NewNote = { id: NoteTarget; position: Point; style?: Partial<TextStyle> };
+const NO_GUIDES: Guides = {};
 type Gesture = {
   pointer: number;
   start: Point;
@@ -24,7 +30,7 @@ type Gesture = {
   tolerance: number;
   targets: SnapTargets;
 } & (
-  | { type: 'data'; datum: Datum; offset: number; scale: Scale; moved: boolean }
+  | { type: 'data'; datum: Datum; value: number | null; scale: Scale; moved: boolean }
   | { type: 'draw'; mark: Mark; statistic?: Statistic }
   | { type: 'line'; index: number; endpoint: 0 | 1 | null; mark: Mark }
   | { type: 'label'; label: MovableText; position: Point; defaultPosition?: Point;
@@ -52,17 +58,29 @@ interface Props {
   snap?: boolean;
   selection?: Selection | null;
   onSelect?: (selection: Selection | null) => void;
+  highlight?: DataHighlight | null;
+  onOccupiedDataPoint?: () => void;
   activeSeries?: number;
   onSelectSeries?: (index: number) => void;
   stats?: Record<Statistic, number> | null;
   onAddStatistic?: (statistic: Statistic) => void;
   onEditPictographLegend?: () => void;
+  onEditObject?: (selection: Selection, trigger: SVGElement) => void;
+  panMode?: boolean;
   onEdit?: ChartEdit;
   svgRef?: RefObject<SVGSVGElement | null>;
 }
 
 function withinPlot({ x, y }: Point, plot: Plot) {
   return x >= plot.left && x <= plot.right && y >= plot.top && y <= plot.bottom;
+}
+
+function resizeAxis(chart: ChartDocument, axis: Axis, delta: number) {
+  const previous = chart.style.axes[axis];
+  const { min, max } = AXIS_LENGTHS[axis];
+  const length = clamp(Math.round(previous.length + delta), min, max);
+  return length === previous.length ? chart
+    : { ...chart, style: { ...chart.style, axes: { ...chart.style.axes, [axis]: { ...previous, length } } } };
 }
 
 function pieNoteTargets(center: Point, radius: number): SnapTargets {
@@ -76,6 +94,21 @@ function SeriesDot({ x, y, size, color, width, shape, fill }: {
   if (shape === 'square') return <rect x={x - size} y={y - size} width={2 * size} height={2 * size} {...paint} />;
   if (shape === 'diamond') return <path d={`M ${x} ${y - size} l ${size} ${size} -${size} ${size} -${size} -${size} Z`} {...paint} />;
   return <circle cx={x} cy={y} r={size} {...paint} />;
+}
+
+function ColumnIcons({ symbolId, x, top, bottom, maxSize, pitch, negative }: {
+  symbolId: string; x: number; top: number; bottom: number; maxSize: number; pitch: number; negative: boolean;
+}) {
+  const height = bottom - top;
+  const count = Math.max(1, Math.round(height / pitch));
+  const size = Math.min(maxSize, height / (count + (count - 1) * 0.12));
+  const step = count > 1 ? (height - size) / (count - 1) : 0;
+  const start = count === 1 && negative ? bottom - size : top;
+  return <g data-column-icons="" aria-hidden="true">
+    {Array.from({ length: count }, (_, index) => (
+      <use key={index} href={`#${symbolId}`} x={x - size / 2} y={start + index * step} width={size} height={size} />
+    ))}
+  </g>;
 }
 
 function linePath(values: (number | null)[], scale: Scale, plot: Plot) {
@@ -98,6 +131,11 @@ function linePath(values: (number | null)[], scale: Scale, plot: Plot) {
     const start = before < min || before > max ? `M${crossing(clamp(before, min, max))} ` : '';
     return `${start}L${inside ? `${x},${scale.y(value)}` : crossing(clamp(value, min, max))}`;
   }).join(' ')).join(' ');
+}
+
+function hasLineNeighbor(value: number, neighbor: number | null | undefined, bands: Scale['bands']) {
+  return neighbor != null && bands.some(({ min, max }) => value >= min && value <= max
+    && (neighbor >= min || value > min) && (neighbor <= max || value < max));
 }
 
 function textBounds(element: SVGGraphicsElement, canvasMatrix: DOMMatrix) {
@@ -147,9 +185,11 @@ function alignmentTargets(document: ChartDocument, plot: Plot, scale: Scale, ski
 
 function ChartDisplay({
   document, tool = 'preview', ink = '#cb552e', inkWidth = 3.5, inkOpacity = 1, inkArrows = 'end', lineKind = 'solid',
-  eraseScope = 'all', newTextStyle, snap = true,
-  selection = null, onSelect, activeSeries = 0, onSelectSeries, stats, onAddStatistic, onEditPictographLegend, onEdit, svgRef,
+  eraseScope = 'marks', newTextStyle, snap = true,
+  selection = null, highlight, onSelect, activeSeries = 0, onSelectSeries, onOccupiedDataPoint, stats, onAddStatistic,
+  onEditPictographLegend, onEditObject, panMode = false, onEdit, svgRef,
 }: Props) {
+  const columnSymbolPrefix = `column-icon-${useId().replace(/[^a-z\d_-]/gi, '')}`;
   const selectedLine = selection?.kind === 'mark' ? selection.index : null;
   const selectedText = selection?.kind === 'text' ? selection.target : null;
   const eraseMarks = tool === 'eraser' && eraseScope !== 'data';
@@ -157,17 +197,49 @@ function ChartDisplay({
   const gesture = useRef<Gesture | null>(null);
   const lastLegendClick = useRef<{ time: number; x: number; y: number } | null>(null);
   const draftRef = useRef<ChartDocument | null>(null);
+  const guidesRef = useRef<Guides>(NO_GUIDES);
+  const pendingMove = useRef<globalThis.PointerEvent | null>(null);
+  const previewFrame = useRef<number | null>(null);
   const editorRef = useRef<HTMLInputElement>(null);
+  const canvasRef = useRef<SVGSVGElement>(null);
+  const editorTrigger = useRef<SVGElement>(null);
+  const skipTextBlur = useRef(false);
+  const nextNoteNumber = useRef(1);
+  const focusedNode = useRef<SVGElement>(null);
   const [draft, setDraft] = useState<ChartDocument | null>(null);
   const [editing, setEditing] = useState<TextTarget | null>(null);
-  const [guides, setGuides] = useState<Guides>({});
+  const [newNote, setNewNote] = useState<NewNote | null>(null);
+  const [guides, setGuides] = useState<Guides>(NO_GUIDES);
+  const [focusedObject, setFocusedObject] = useState<string | null>(null);
+  const [adjusting, setAdjusting] = useState(false);
+  const attachCanvas = useCallback((node: SVGSVGElement | null) => {
+    canvasRef.current = node;
+    if (svgRef) svgRef.current = node;
+  }, [svgRef]);
+
+  const canvasObject: CanvasObjectProps = (key, adjustable = false) => ({
+    'data-canvas-object': key,
+    'data-canvas-adjustable': adjustable ? '' : undefined,
+    'data-canvas-adjusting': adjusting && focusedObject === key ? '' : undefined,
+    'aria-description': adjustable ? adjusting && focusedObject === key
+      ? '方向键调节，按 Escape 结束。' : '按 Enter 启用调节，或按 Alt 和方向键微调。' : undefined,
+    tabIndex: !panMode && focusedObject === key ? 0 : -1,
+  });
 
   const stopGesture = () => {
+    if (previewFrame.current !== null) cancelAnimationFrame(previewFrame.current);
+    previewFrame.current = null;
+    pendingMove.current = null;
     gesture.current = null;
     draftRef.current = null;
+    guidesRef.current = NO_GUIDES;
     setDraft(null);
-    setGuides({});
+    setGuides(NO_GUIDES);
   };
+
+  useEffect(() => () => {
+    if (previewFrame.current !== null) cancelAnimationFrame(previewFrame.current);
+  }, []);
 
   useEffect(() => {
     if (tool === 'preview') return;
@@ -180,26 +252,79 @@ function ChartDisplay({
 
   useEffect(() => {
     if (tool !== 'preview') stopGesture();
-  }, [document, tool]);
+  }, [document, tool, panMode]);
 
   useEffect(() => {
     if (selectedText === null) setEditing(null);
   }, [selectedText]);
 
-  function setPreview(preview: ChartDocument) {
-    draftRef.current = preview;
-    setDraft(preview);
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current;
+    if (!focusedObject || !canvas || canvas.querySelector(`[data-canvas-object="${CSS.escape(focusedObject)}"]`)) return;
+    setFocusedObject(null);
+    setAdjusting(false);
+    if (focusedNode.current && !focusedNode.current.isConnected && canvas.ownerDocument.activeElement === canvas.ownerDocument.body) {
+      canvas.focus({ preventScroll: true });
+    }
+  }, [focusedObject, document, tool, selection]);
+
+  function focusCanvasObject(event: FocusEvent<SVGSVGElement>) {
+    const object = (event.target as Element).closest<SVGElement>('[data-canvas-object]');
+    if (!object || object.dataset.canvasObject === focusedObject) return;
+    focusedNode.current = object;
+    setFocusedObject(object.dataset.canvasObject);
+    setAdjusting(false);
   }
 
-  function pointerPosition(event: PointerEvent<SVGSVGElement>): Point | null {
-    const matrix = event.currentTarget.getScreenCTM();
+  function navigateCanvas(event: KeyboardEvent<SVGSVGElement>) {
+    const target = event.target as Element;
+    if (target.closest('foreignObject') || event.isComposing || event.ctrlKey || event.metaKey) return;
+    const object = target.closest<SVGElement>('[data-canvas-object]');
+    if (object?.hasAttribute('data-canvas-adjustable') && !event.altKey &&
+      (event.key === 'Enter' || event.key === ' ' || adjusting && event.key === 'Escape')) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!event.repeat) setAdjusting(!adjusting);
+      return;
+    }
+    if (event.altKey || adjusting || !arrowOffset(event.key, false)) return;
+    const canvas: SVGSVGElement = event.currentTarget;
+    const objects = Array.from(canvas.querySelectorAll<SVGElement>('[data-canvas-object]'));
+    if (!objects.length) return;
+    if (selectedLine !== null && objects.at(-1)?.dataset.endpoint !== undefined) {
+      const endpoints = objects.splice(-2);
+      const line = objects.findIndex(item => item.dataset.canvasObject === `mark:${selectedLine}`);
+      objects.splice(line < 0 ? objects.length : line + 1, 0, ...endpoints);
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const index = object ? objects.indexOf(object) : -1;
+    const direction = event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1;
+    const next = index < 0 ? direction === 1 ? 0 : objects.length - 1 : (index + direction + objects.length) % objects.length;
+    objects[next].focus();
+  }
+
+  function activateCanvasObject(event: KeyboardEvent<SVGElement>, next: Selection) {
+    if (event.key !== 'Enter' && event.key !== ' ') return false;
+    event.preventDefault();
+    onSelect?.(next);
+    onEditObject?.(next, event.currentTarget);
+    return true;
+  }
+
+  function setPreview(preview: ChartDocument) {
+    draftRef.current = preview;
+  }
+
+  function pointerPosition(event: Pick<PointerEvent, 'clientX' | 'clientY'>): Point | null {
+    const matrix = canvasRef.current?.getScreenCTM();
     if (!matrix) return null;
     const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse());
     return { x: clamp(point.x, 0, WIDTH), y: clamp(point.y, 0, HEIGHT) };
   }
 
   function startGesture(event: PointerEvent<SVGSVGElement>) {
-    if (tool === 'preview' || !event.isPrimary || event.button !== 0 || gesture.current) return;
+    if (tool === 'preview' || panMode || !event.isPrimary || event.button !== 0 || gesture.current) return;
     const element = event.target as Element;
     if (element.closest('foreignObject')) return;
     const target = element.closest<SVGElement>('[data-datum], [data-mark], [data-editable], [data-move-text], [data-note], [data-axis-end], [data-axis-target], [data-stat], [data-pie-legend], [data-pictograph-legend], [data-pictograph-table-resize], [data-pictograph-category-resize], [data-pie-move]');
@@ -209,6 +334,9 @@ function ChartDisplay({
 
     const point = pointerPosition(event);
     if (!point) return;
+    if (editorRef.current !== event.currentTarget.ownerDocument.activeElement) {
+      event.currentTarget.focus({ preventScroll: true });
+    }
     const plot = getPlot(document.style, document.plotOffset);
     const hasAxes = hasChartAxes(document.kind);
     const scale = hasAxes ? getScale(displayedSeries(document), document.scaleExtent, plot, document.style.axes.y) : getScale([]);
@@ -307,19 +435,23 @@ function ChartDisplay({
       editorRef.current?.blur();
       onSelect(datum ? { kind: 'data', datum } : null);
       return;
-    } else if (tool === 'select') {
-      if (!datum && !withinPlot(point, plot)) {
+    } else if (tool === 'select' || tool === 'add-data') {
+      const adding = tool === 'add-data';
+      if (adding ? !hasAxes || !withinPlot(point, plot) : !datum) {
         editorRef.current?.blur();
         onSelect?.(null);
         return;
       }
-      const index = clamp(Math.floor((point.x - plot.left) / (plot.right - plot.left) * document.categories.length), 0, document.categories.length - 1);
-      const selected = datum ?? { series: activeSeries, index };
+      const index = Math.floor((point.x - plot.left) / (plot.right - plot.left) * document.categories.length);
+      const selected = adding ? { series: activeSeries, index: clamp(index, 0, document.categories.length - 1) } : datum;
       const value = document.series[selected.series].values[selected.index];
-      const offset = datum && value !== null ? scale.y(Math.min(value, scale.limit)) - point.y : 0;
-      gesture.current = { ...base, type: 'data', datum: selected, scale, offset, moved: !datum };
+      if (adding && value !== null) {
+        onOccupiedDataPoint?.();
+        return;
+      }
+      gesture.current = { ...base, type: 'data', datum: selected, scale, value, moved: adding };
       onSelectSeries(selected.series);
-      if (!datum) setPreview(setChartValue(document, selected.series, selected.index, scale.valueAt(point.y)));
+      if (adding) setPreview(setChartValue(document, selected.series, selected.index, scale.valueAt(point.y)));
     } else if (tool === 'text') {
       gesture.current = { ...base, type: 'newText' };
     } else {
@@ -336,11 +468,12 @@ function ChartDisplay({
         statistic: target?.dataset.stat as Statistic | undefined };
       if (tool === 'pen') setPreview({ ...document, marks: [...document.marks, mark] });
     }
+    if (draftRef.current) setDraft(draftRef.current);
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
   }
 
-  function moveGesture(event: PointerEvent<SVGSVGElement>, finish = false) {
+  function moveGesture(event: globalThis.PointerEvent, finish = false) {
     const current = gesture.current;
     if (!current || current.pointer !== event.pointerId) return;
     const point = pointerPosition(event);
@@ -354,10 +487,11 @@ function ChartDisplay({
     if (current.type === 'newText') return;
 
     if (current.type === 'data') {
-      if (!current.moved && distance < threshold) return;
+      if (!current.moved && Math.abs(offset.y) < threshold) return;
       current.moved = true;
-      const { datum, scale } = current;
-      setPreview(setChartValue(current.base, datum.series, datum.index, scale.valueAt(point.y + current.offset)));
+      const { datum, scale, value } = current;
+      const next = value === null ? scale.valueAt(point.y) : scale.drag(value, offset.y);
+      setPreview(setChartValue(current.base, datum.series, datum.index, next));
       return;
     }
 
@@ -386,11 +520,7 @@ function ChartDisplay({
     if (current.type === 'axis') {
       if (distance < threshold && !draftRef.current) return;
       const { axis } = current;
-      const old = current.base.style.axes[axis];
-      const { min, max } = AXIS_LENGTHS[axis];
-      const length = clamp(Math.round(old.length + (axis === 'x' ? offset.x : -offset.y)), min, max);
-      const style = { ...current.base.style, axes: { ...current.base.style.axes, [axis]: { ...old, length } } };
-      setPreview(length === old.length ? current.base : { ...current.base, style });
+      setPreview(resizeAxis(current.base, axis, axis === 'x' ? offset.x : -offset.y));
       return;
     }
 
@@ -402,7 +532,7 @@ function ChartDisplay({
         { x: position.x + offset.x, y: position.y + offset.y }, targets, tolerance,
         { x: current.boundsX, y: current.boundsY },
       );
-      setGuides(guides);
+      guidesRef.current = guides;
       const base = current.base;
       if (point.x === position.x && point.y === position.y) setPreview(base);
       else if (current.type === 'legend') {
@@ -414,7 +544,7 @@ function ChartDisplay({
           const { legend } = pieLayout(base);
           const attached = tolerance > 0 && Math.hypot(position.x + offset.x - legend.naturalPosition.x,
             position.y + offset.y - legend.naturalPosition.y) <= tolerance;
-          if (attached) setGuides(legend.naturalPosition);
+          if (attached) guidesRef.current = legend.naturalPosition;
           setPreview(attached ? resetPieLegend(base) : { ...resetPieLegend(base), pieLegendPosition: point });
         }
       } else if (current.type === 'pie-plot') {
@@ -445,7 +575,7 @@ function ChartDisplay({
       if (endpoint === null) {
         const aligned = translateLine(mark.points, offset, targets, tolerance);
         points = aligned.points;
-        setGuides(tolerance > 0 ? aligned.guides : {});
+        guidesRef.current = tolerance > 0 ? aligned.guides : NO_GUIDES;
       } else {
         const fixed = mark.points[1 - endpoint];
         const initial = mark.points[endpoint];
@@ -453,7 +583,7 @@ function ChartDisplay({
         const aligned = snapEndpoint(fixed, aimed, targets, tolerance, event.shiftKey);
         if (Math.hypot(fixed.x - aligned.point.x, fixed.y - aligned.point.y) < 4) return;
         points = mark.points.map((point, i) => endpoint === i ? aligned.point : point);
-        setGuides(tolerance > 0 || event.shiftKey ? aligned.guides : {});
+        guidesRef.current = tolerance > 0 || event.shiftKey ? aligned.guides : NO_GUIDES;
       }
       const changed = points.some((point, i) => point.x !== mark.points[i].x || point.y !== mark.points[i].y);
       setPreview(changed ? {
@@ -469,7 +599,7 @@ function ChartDisplay({
       const start = mark.points[0];
       const end = snapEndpoint(start, point, targets, tolerance, event.shiftKey);
       current.mark = { ...mark, points: [start, end.point] };
-      setGuides(tolerance > 0 || event.shiftKey ? end.guides : {});
+      guidesRef.current = tolerance > 0 || event.shiftKey ? end.guides : NO_GUIDES;
       setPreview({ ...current.base, marks: [...current.base.marks, current.mark] });
       return;
     }
@@ -481,29 +611,49 @@ function ChartDisplay({
     setPreview({ ...current.base, marks: [...current.base.marks, current.mark] });
   }
 
+  function flushPointerMove() {
+    const event = pendingMove.current;
+    pendingMove.current = null;
+    if (event) moveGesture(event);
+  }
+
+  function queuePointerMove(event: PointerEvent<SVGSVGElement>) {
+    const current = gesture.current;
+    if (!current || current.pointer !== event.pointerId || current.type === 'newText') return;
+    // A pen stroke needs each sample, while a drag needs the latest position.
+    if (current.type === 'draw' && current.mark.type === 'pen') moveGesture(event.nativeEvent);
+    else pendingMove.current = event.nativeEvent;
+    if (previewFrame.current !== null) return;
+    previewFrame.current = requestAnimationFrame(() => {
+      previewFrame.current = null;
+      flushPointerMove();
+      setDraft(draftRef.current);
+      setGuides(guidesRef.current);
+    });
+  }
+
   function finishGesture(event: PointerEvent<SVGSVGElement>) {
     const current = gesture.current;
     if (!current || current.pointer !== event.pointerId) return;
-    moveGesture(event, true);
+    flushPointerMove();
+    moveGesture(event.nativeEvent, true);
     const preview = draftRef.current;
     const newLine = current.type === 'draw' && current.mark.type === 'line';
     stopGesture();
     const validLine = !newLine || Math.hypot(current.mark.points[1].x - current.mark.points[0].x,
       current.mark.points[1].y - current.mark.points[0].y) >= 4;
     if (current.type === 'newText') {
-      const next = document.notes.reduce((max, note) => Math.max(max, Number(note.id.slice(5))), 0) + 1;
-      const id: NoteTarget = `note:${next}`;
       const halfWidth = newTextStyle?.size ?? 18;
       const alignment = newTextStyle?.alignment ?? 'start';
       const left = alignment === 'end' ? halfWidth * 2 + 6 : alignment === 'middle' ? halfWidth + 6 : 10;
       const right = alignment === 'start' ? WIDTH - halfWidth * 2 - 6 : alignment === 'middle' ? WIDTH - halfWidth - 6 : WIDTH - 10;
       const position = { x: clamp(current.start.x, left, right), y: clamp(current.start.y, halfWidth + 8, HEIGHT - 8) };
       editorRef.current?.blur();
-      onEdit(chart => ({
-        ...chart, notes: [...chart.notes, { id, position, text: '文字' }],
-        textStyles: newTextStyle ? { ...chart.textStyles, [id]: newTextStyle } : chart.textStyles,
-      }));
-      startTextEditing(id);
+      const usedIds = new Set(document.notes.map(note => note.id));
+      while (usedIds.has(`note:${nextNoteNumber.current}`)) nextNoteNumber.current++;
+      const id: NoteTarget = `note:${nextNoteNumber.current++}`;
+      onSelect(null);
+      setNewNote({ id, position, style: newTextStyle });
       return;
     }
     if (current.type === 'draw' && current.statistic && !preview) {
@@ -542,15 +692,28 @@ function ChartDisplay({
     if (gesture.current?.pointer === event.pointerId) stopGesture();
   }
 
-  function startTextEditing(target: TextTarget) {
+  function startTextEditing(target: TextTarget, trigger?: SVGElement) {
     if (editing !== target) editorRef.current?.blur();
+    editorTrigger.current = trigger ?? null;
     onSelect({ kind: 'text', target });
     setEditing(target);
   }
 
   function editText(target: TextTarget, value: string) {
+    editorTrigger.current = null;
     setEditing(null);
     const text = value.trim();
+    if (newNote?.id === target) {
+      const { id, position, style } = newNote;
+      setNewNote(null);
+      if (!text) return;
+      onEdit(chart => ({
+        ...chart, notes: [...chart.notes, { id, position, text }],
+        textStyles: style ? { ...chart.textStyles, [id]: style } : chart.textStyles,
+      }));
+      onSelect({ kind: 'text', target: id });
+      return;
+    }
     if (!text) {
       onEdit(current => hideText(current, target));
       onSelect(null);
@@ -568,17 +731,21 @@ function ChartDisplay({
   }
 
   const chart = draft ?? document;
-  const sheetHeight = chartSheetHeight(chart);
   const pie = chart.kind === 'pie';
   const pictograph = chart.kind === 'pictograph';
   const hasAxes = hasChartAxes(chart.kind);
   const pieChart = pie ? pieLayout(chart) : null;
   const columns = chart.kind === 'bar';
   const singleBar = columns && !chart.groupedColumns;
-  const visibleSeries = displayedSeries(chart);
-  const plot = getPlot(chart.style, chart.plotOffset);
-  const scale = gesture.current?.type === 'data' ? gesture.current.scale
-    : hasAxes ? getScale(visibleSeries, chart.scaleExtent, plot, chart.style.axes.y) : getScale([]);
+  const visibleSeries = useMemo(() => displayedSeries(chart),
+    [chart.kind, chart.groupedColumns, chart.series, chart.barSeries, chart.pieSeries, chart.pictographSeries]);
+  const plot = useMemo(() => getPlot(chart.style, chart.plotOffset), [chart.style, chart.plotOffset]);
+  const { sheetHeight, entries: legend } = layoutSeriesLegend(chart, plot);
+  const dragScale = gesture.current?.type === 'data' ? gesture.current.scale : null;
+  const scale = useMemo(() => dragScale ?? (hasAxes ? getScale(visibleSeries, chart.scaleExtent, plot, chart.style.axes.y) : getScale([])),
+    [dragScale, hasAxes, visibleSeries, chart.scaleExtent, plot, chart.style.axes.y]);
+  const preview = tool === 'preview';
+  const exportWarnings = useMemo(() => preview ? [] : chartDataWarnings(chart, scale).messages, [preview, chart, scale]);
   const count = chart.categories.length;
   const spacing = (plot.right - plot.left) / count;
   const groupWidth = columns && chart.groupedColumns ? spacing * (chart.style.groupWidth ?? DEFAULT_GROUP_WIDTH)
@@ -598,20 +765,17 @@ function ChartDisplay({
   const angledCategories = categoryBand < 44 && chart.categories.some((category, index) => (
     index % xTickEvery === 0 && Array.from(category).length * 14 > categoryBand - 6
   ));
-  const yTickSize = clamp(scale.tickSpacing * 0.85, 4, 13);
+  const yTickSize = 13;
+  const yTickLabels = showY && yAxis.showValues ? spacedTickLabels(scale.ticks, scale.y, style.showOrigin, omission) : null;
   const xEnd = { x: plot.right + 10, y: zero };
   const yEnd = { x: plot.left, y: plot.top - verticalAxisExtension(yAxis) };
   const xTitle = axisTitleLayout('x', plot, chart, zero);
   const yTitle = axisTitleLayout('y', plot, chart);
   const xLabel = chart.labelPositions.xLabel ?? xTitle.point;
   const yLabel = chart.labelPositions.yLabel ?? yTitle.point;
-  const legendColumns = Math.min(visibleSeries.length, clamp(Math.floor((plot.right - plot.left) / 92), 1, 6));
-  const legendLimit = Math.min(12, legendColumns * 3);
-  const legendLeft = (plot.left + plot.right - legendColumns * 92) / 2;
-  const legendRows = Math.ceil(Math.min(visibleSeries.length, legendLimit) / legendColumns);
-  const legendTop = Math.min(plot.bottom + (xAxis.showLabel ? 98 : 72), HEIGHT - 15 - (legendRows - 1) * 16);
 
   function handleDatumKey(event: KeyboardEvent<SVGGElement>, series: number, index: number, value: number | null) {
+    if (activateCanvasObject(event, { kind: 'data', datum: { series, index } })) return;
     const clearing = event.key === 'Delete' || event.key === 'Backspace';
     if (!clearing && (pie || !['ArrowUp', 'ArrowDown'].includes(event.key))) return;
     event.preventDefault();
@@ -620,6 +784,33 @@ function ChartDisplay({
     if (next !== null && !Number.isFinite(next)) return;
     onEdit(current => setChartValue(current, series, index, next));
     if (next === null) onSelect(null);
+  }
+
+  function handleAxisKey(event: KeyboardEvent<SVGGElement>, axis: Axis | 'both') {
+    if (activateCanvasObject(event, { kind: 'axis', axis })) return;
+    const offset = arrowOffset(event.key, event.shiftKey);
+    if (!offset) return;
+    event.preventDefault();
+    onEdit(current => {
+      if (axis !== 'both') return resizeAxis(current, axis, axis === 'x' ? offset.x : -offset.y);
+      const currentOffset = constrainPlotOffset(current.style, current.plotOffset);
+      return movePlot(current, { x: currentOffset.x + offset.x, y: currentOffset.y + offset.y });
+    });
+  }
+
+  function handleMarkKey(event: KeyboardEvent<SVGElement>, index: number, mark: Mark, endpoint?: number) {
+    if (activateCanvasObject(event, { kind: 'mark', index })) return;
+    const offset = arrowOffset(event.key, event.shiftKey);
+    if (!offset) return;
+    event.preventDefault();
+    const points = endpoint === undefined ? translateLine(mark.points, offset, NO_TARGETS, 0).points
+      : mark.points.map((point, i) => endpoint === i
+        ? { x: clamp(point.x + offset.x, 0, WIDTH), y: clamp(point.y + offset.y, 0, HEIGHT) }
+        : point);
+    if (points.every((point, i) => point.x === mark.points[i].x && point.y === mark.points[i].y)) return;
+    if (endpoint !== undefined && Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y) < 4) return;
+    onEdit(current => ({ ...current, marks: current.marks.map((item, i) => i === index
+      ? { ...mark, points, referenceValue: undefined } : item) }));
   }
 
   function chartText(target: TextTarget, x: number, y: number, fallback: string, options: {
@@ -631,13 +822,14 @@ function ChartDisplay({
     autoSize?: number;
     cellHeight?: number;
     exercise?: ReturnType<typeof exerciseNoteLayout>;
+    pending?: NewNote;
   } = {}) {
-    const { width = 160, max = 12, maxWidth = Infinity, rotation = 0, autoSize, cellHeight, exercise } = options;
-    const textStyle = getTextStyle(chart, target);
+    const { width = 160, max = 12, maxWidth = Infinity, rotation = 0, autoSize, cellHeight, exercise, pending } = options;
+    const textStyle = { ...getTextStyle(chart, target), ...pending?.style };
     const customStyle = chart.textStyles?.[target];
     const { color, bold, italic, underline } = textStyle;
     const fontFamily = TEXT_FONTS[textStyle.font].family;
-    const text = textValue(chart, target);
+    const text = pending ? '' : textValue(chart, target);
     const axisLabel = target === 'xLabel' || target === 'yLabel' ? target : undefined;
     const note = isNote(target) ? target : undefined;
     const anchor = note ? textStyle.alignment : options.anchor ?? 'middle';
@@ -660,7 +852,7 @@ function ChartDisplay({
     const editorHeight = size + 22;
     return (
       <g key={target}>
-        {(text || showPlaceholder) && (
+        {!pending && (text || showPlaceholder) && (
           <text x={x} y={y} textAnchor={anchor} fontSize={size} fill={showPlaceholder ? '#687780' : color}
             dominantBaseline={inCell ? 'central' : undefined}
             fontFamily={fontFamily} fontWeight={bold ? 700 : 500} fontStyle={fontStyle}
@@ -675,26 +867,31 @@ function ChartDisplay({
             data-axis-label={activate ? axisLabel : undefined}
             data-note={note}
             data-move-text={activate ? axisLabel ?? note : undefined}
-            tabIndex={activate ? 0 : undefined} aria-label={activate ? `编辑${fallback}${text ? `：${text}` : ''}` : undefined}
-            onClick={axisLabel || note ? undefined : activate} onKeyDown={activate ? event => {
+            {...(activate ? canvasObject(`text:${target}`) : {})}
+            aria-label={activate ? `编辑${fallback}${text ? `：${text}` : ''}` : undefined}
+            onFocus={activate ? () => onSelect({ kind: 'text', target }) : undefined}
+            onClick={panMode || axisLabel || note ? undefined : activate} onKeyDown={activate ? event => {
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
-                activate();
+                startTextEditing(target, event.currentTarget);
               }
             } : undefined}>
+            {text && display !== text && !exercise && <title>{text}</title>}
             {exercise && text ? exercise.lines.map((line, index) => (
               <tspan key={index} x={x} y={y + index * exercise.lineHeight}>{line}</tspan>
             )) : display}
           </text>
         )}
-        {editing === target && (
+        {(pending || editing === target) && (
           <foreignObject x={editorX}
             y={clamp(inCell ? y - editorHeight / 2 : y - size - 8, 2, (exercise ? sheetHeight : HEIGHT) - editorHeight - 2)}
             width={width} height={editorHeight} data-editor="">
-            <input ref={editorRef} className="canvas-input" aria-label={fallback} defaultValue={text}
+            <input ref={editorRef} className="canvas-input" aria-label={fallback} defaultValue={text} placeholder={pending ? '输入文字' : undefined}
               style={{ fontFamily, fontSize: Math.max(16, size), fontWeight: bold ? 700 : 500, color, fontStyle, textDecoration }}
               autoFocus onFocus={event => event.currentTarget.select()}
-              onBlur={event => editText(target, event.currentTarget.value)}
+              onBlur={event => {
+                if (!skipTextBlur.current) editText(target, event.currentTarget.value);
+              }}
               onKeyDown={event => {
                 if (event.nativeEvent.isComposing) return;
                 const input = event.currentTarget;
@@ -703,11 +900,22 @@ function ChartDisplay({
                   input.value = '';
                   input.blur();
                 }
-                if (event.key === 'Enter') event.currentTarget.blur();
-                if (event.key === 'Escape') {
-                  event.currentTarget.value = text;
-                  event.currentTarget.blur();
-                  onSelect(null);
+                if (event.key === 'Enter' || event.key === 'Escape') {
+                  event.preventDefault();
+                  const trigger = editorTrigger.current;
+                  if (event.key === 'Escape') {
+                    skipTextBlur.current = true;
+                    editorTrigger.current = null;
+                    setEditing(null);
+                    if (pending) setNewNote(null);
+                  }
+                  input.blur();
+                  skipTextBlur.current = false;
+                  if (trigger?.isConnected) trigger.focus({ preventScroll: true });
+                  else {
+                    canvasRef.current?.focus({ preventScroll: true });
+                    if (event.key === 'Escape') onSelect(null);
+                  }
                 }
               }} />
           </foreignObject>
@@ -723,7 +931,8 @@ function ChartDisplay({
     return (
       <g key={`datum:${index}`} data-datum="" data-index={index} data-series={series}
         className={editable || eraseData ? 'chart-datum' : undefined}
-        role={editable ? 'button' : undefined} tabIndex={editable ? 0 : undefined} aria-label={editable ? description : undefined}
+        role={editable ? 'button' : undefined} {...(editable ? canvasObject(`datum:${series}:${index}`) : {})}
+        aria-label={editable ? description : undefined}
         onFocus={editable ? () => onSelect({ kind: 'data', datum }) : undefined}
         onKeyDown={editable ? event => handleDatumKey(event, series, index, value) : undefined}>
         <title>{description}</title>
@@ -732,21 +941,40 @@ function ChartDisplay({
     );
   }
 
+  const valueLabels: { key: string; x: number; y: number; text: string; offset: number; fill: string; halo: boolean }[] = [];
+  const clippedLabels: { x: number; y: number; text: string }[] = [];
   const dataGraphics: ReactNode[] = !hasAxes ? [] : chart.series.map((series, seriesIndex) => {
     if (singleBar && seriesIndex !== (chart.barSeries ?? 0)) return null;
     const seriesStyle = getSeriesStyle(series, style);
     const columnWidth = barWidth * seriesStyle.columnWidth;
+    const columnIcon = columns ? seriesStyle.columnIcon : undefined;
+    const symbolId = `${columnSymbolPrefix}-${seriesIndex}`;
+    const iconSize = Math.min(48, columnWidth);
+    const preferredPitch = Math.max(24, iconSize + 4);
+    const tickSpacing = scale.tickSpacing;
+    const iconPitch = Number.isFinite(tickSpacing) && tickSpacing > 0
+      ? Math.max(24, tickSpacing / Math.ceil(tickSpacing / preferredPitch)) : preferredPitch;
     const lightColor = isLightColor(series.color);
+    const flashing = highlight?.series === seriesIndex;
+    const line = chart.kind === 'line' ? linePath(series.values, scale, plot) : null;
     return (
     <g key={seriesIndex}>
-      {chart.kind === 'line' && (
-        <path d={linePath(series.values, scale, plot)} fill="none" stroke={series.color} strokeWidth={seriesStyle.strokeWidth}
+      {columnIcon && <defs>
+        <symbol id={symbolId} viewBox="0 0 24 24">
+          <PictographIcon name={columnIcon.symbol} color={series.color} colored={columnIcon.colorMode === 'color'} outline={false} />
+        </symbol>
+      </defs>}
+      {line !== null && flashing && highlight.index === undefined && <path d={line} fill="none" stroke="#819bff"
+        strokeWidth={seriesStyle.strokeWidth + 7} opacity="0.58" strokeLinecap="round" strokeLinejoin="round"
+        pointerEvents="none" data-editor-only="" data-value-highlight="" />}
+      {line !== null && (
+        <path d={line} fill="none" stroke={series.color} strokeWidth={seriesStyle.strokeWidth}
           strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />
       )}
       {series.values.map((value, index) => {
         if (value === null || scale.inBreak(value)) return null;
         const clipped = value > scale.limit;
-        if (clipped && (chart.kind === 'line' || scale.limit === 0)) return null;
+        if (clipped && chart.kind === 'line') return null;
         const center = categoryX(index, count, plot);
         const x = columns && !singleBar ? center - groupWidth / 2 + (seriesIndex + 0.5) * barWidth : center;
         const y = scale.y(Math.min(value, scale.limit));
@@ -756,53 +984,84 @@ function ChartDisplay({
           return start < end || value === 0 && start === end ? [{ top: scale.y(end), bottom: scale.y(start) }] : [];
         }) : [];
         const negativeBar = value < 0 && columns;
+        const labelBelow = negativeBar && y + 20 < plot.bottom;
         const labelInside = negativeBar && y + 20 >= plot.bottom && y - zero >= 24 && barWidth >= 30;
         const labelGap = chart.kind === 'line' ? Math.max(13, seriesStyle.dotSize + 7) : 13;
-        const labelY = labelInside ? y - 7 : negativeBar && y + 20 < plot.bottom ? y + 17 : y - labelGap - seriesIndex % 3 * 3;
+        const labelY = labelInside ? y - 7 : labelBelow ? y + 17 : y - labelGap;
+        const valueText = formatValue(value);
+        if (clipped) clippedLabels.push({ x, y: labelY, text: valueText });
+        else if (seriesStyle.showLabels && index % valueEvery === 0) {
+          valueLabels.push({
+            key: `${seriesIndex}:${index}`, x, y: labelY, text: valueText,
+            offset: labelInside ? 0 : labelBelow ? 20 : -20,
+            fill: columnIcon?.colorMode === 'color' || lightColor ? '#26334c' : labelInside && !columnIcon ? '#fff' : series.color,
+            halo: !columns || Boolean(labelInside && columnIcon),
+          });
+        }
         const editable = tool === 'select';
         const activeDatum = editable || eraseData;
         const isSelected = selection?.kind === 'data' && selection.datum.series === seriesIndex && selection.datum.index === index;
+        const isHighlighted = flashing && (highlight.index === index || highlight.index === undefined);
         return (
           <g key={index} data-datum="" data-series={seriesIndex} data-index={index}
             className={activeDatum ? 'chart-datum' : undefined}
-            role={editable ? 'button' : undefined} tabIndex={editable ? 0 : undefined}
-            aria-label={editable ? `${chart.categories[index]}，${series.name}，${formatValue(value)}` : undefined}
+            role={editable ? 'button' : undefined} {...(editable ? canvasObject(`datum:${seriesIndex}:${index}`) : {})}
+            aria-label={editable ? `${chart.categories[index]}，${series.name}，${valueText}` : undefined}
             onFocus={editable ? () => onSelect({ kind: 'data', datum: { series: seriesIndex, index } }) : undefined}
             onKeyDown={editable ? event => handleDatumKey(event, seriesIndex, index, value) : undefined}>
+            {editable && <title>{`${chart.categories[index]}，${series.name}，${valueText}`}</title>}
             {columns ? (
               <>
-                {columnBands.map(({ top, bottom }) => <g key={top}>
-                  <rect x={x - columnWidth / 2} y={top - (value === 0 ? 1.5 : 0)} width={columnWidth}
-                    height={Math.max(1.5, bottom - top)}
-                    rx={seriesStyle.roundedColumns ? Math.min(4, barWidth * 0.1) : undefined} fill={series.color} />
-                  {activeDatum && <rect x={x - barWidth / 2} y={top - 6} width={barWidth}
-                    height={bottom - top + 12} fill="transparent" data-editor-only="" />}
-                </g>)}
+                {columnBands.map(({ top, bottom }) => {
+                  const height = bottom - top;
+                  // Keep the baseline mark for zero and a visible mark for very short bands.
+                  const showIcon = columnIcon && value !== 0 && height >= iconSize * 0.2;
+                  return <g key={top}>
+                    {showIcon
+                      ? <ColumnIcons symbolId={symbolId} x={x} top={top} bottom={bottom}
+                          maxSize={iconSize} pitch={iconPitch} negative={negativeBar} />
+                      : <rect x={x - columnWidth / 2} y={top - (value === 0 ? 1.5 : 0)} width={columnWidth}
+                          height={Math.max(1.5, height)}
+                          rx={seriesStyle.roundedColumns ? Math.min(4, barWidth * 0.1) : undefined} fill={series.color} />}
+                    {(isHighlighted || isSelected && columnIcon) && <rect x={x - columnWidth / 2 - 3} y={top - 3} width={columnWidth + 6}
+                      height={height + 6} rx="3" fill="none" stroke="#506fe7" strokeWidth="3"
+                      pointerEvents="none" data-editor-only="" data-value-highlight={isHighlighted ? '' : undefined} />}
+                    {activeDatum && <rect x={x - barWidth / 2} y={top - 6} width={barWidth}
+                      height={height + 12} fill="transparent" data-editor-only="" />}
+                  </g>;
+                })}
               </>
             ) : (
               <>
-                {(series.style?.dots ?? (seriesStyle.dots || series.values[index - 1] == null && series.values[index + 1] == null)) && (
+                {(seriesStyle.dots || !hasLineNeighbor(value, series.values[index - 1], scale.bands)
+                  && !hasLineNeighbor(value, series.values[index + 1], scale.bands)) && (
                   <SeriesDot x={x} y={y} size={seriesStyle.dotSize} width={seriesStyle.strokeWidth}
                     shape={seriesStyle.dotShape} fill={seriesStyle.dotFill} color={series.color} />
                 )}
                 {activeDatum && <circle cx={x} cy={y} r={Math.max(12, seriesStyle.dotSize + 4)} fill="transparent" data-editor-only="" />}
               </>
             )}
-            {seriesStyle.showLabels && !clipped && index % valueEvery === 0 && (
-              <text x={x} y={labelY} textAnchor="middle" fontSize="14" fontWeight="650"
-                fill={lightColor ? '#26334c' : labelInside ? '#fff' : series.color} pointerEvents="none">
-                {formatValue(value)}
+            {clipped && <g data-clipped-value={value} pointerEvents="none">
+              <path d={`M ${x - Math.min(6, columnWidth / 2)} ${y + 4} L ${x} ${y - 3} L ${x + Math.min(6, columnWidth / 2)} ${y + 4}`}
+                fill="#fff" stroke="#84591d" strokeWidth="1.5" strokeLinejoin="round" />
+              <text x={x} y={labelY} textAnchor="middle" fontSize={VALUE_FONT_SIZE} data-custom-size="" fontWeight="650" fill="#77511d">
+                {valueText}
               </text>
-            )}
-            {isSelected && <circle cx={x} cy={y} r={chart.kind === 'line' ? Math.max(9, seriesStyle.dotSize + 4) : 9}
+            </g>}
+            {clipped && !columnBands.length && activeDatum && <rect x={x - barWidth / 2} y={y - 7} width={barWidth}
+              height={14} fill="transparent" data-editor-only="" />}
+            {isSelected && !columnIcon && <circle cx={x} cy={y} r={chart.kind === 'line' ? Math.max(9, seriesStyle.dotSize + 4) : 9}
               fill="none" stroke="#6983ef" strokeWidth="2"
               pointerEvents="none" data-editor-only="" />}
+            {!columns && isHighlighted && <circle cx={x} cy={y} r={Math.max(13, seriesStyle.dotSize + 7)}
+              fill="none" stroke="#506fe7" strokeWidth="3" pointerEvents="none" data-editor-only="" data-value-highlight="" />}
           </g>
         );
       })}
     </g>
     );
   });
+  const placedValues = placeValueLabels(valueLabels, clippedLabels, WIDTH, plot.bottom + 5);
 
   function tickOffset(axis: Axis) {
     const { tickLength, tickPosition } = style.axes[axis];
@@ -825,19 +1084,28 @@ function ChartDisplay({
   }
 
   return (
-    <svg ref={svgRef} className={`chart-sheet tool-${tool}`} viewBox={`0 0 ${WIDTH} ${sheetHeight}`} data-chart-kind={chart.kind}
+    <svg ref={attachCanvas} className={`chart-sheet tool-${tool}`} viewBox={`0 0 ${WIDTH} ${sheetHeight}`} data-chart-kind={chart.kind}
+      data-pan-mode={panMode || undefined} tabIndex={tool === 'preview' || panMode ? undefined : focusedObject ? -1 : 0}
       role={tool === 'preview' ? undefined : 'group'} aria-label={tool === 'preview' ? undefined : '统计图画布'}
+      aria-description={tool === 'preview' || panMode ? undefined : '方向键切换对象，按 Enter 或空格编辑。按 Alt 和方向键微调数据和可移动对象。'}
       aria-hidden={tool === 'preview' || undefined} fontFamily={FONT}
-      onPointerDown={startGesture} onPointerMove={event => moveGesture(event)}
+      onFocus={tool === 'preview' || panMode ? undefined : focusCanvasObject} onKeyDownCapture={tool === 'preview' || panMode ? undefined : navigateCanvas}
+      onBlur={tool === 'preview' ? undefined : event => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setAdjusting(false);
+      }}
+      onPointerDown={startGesture} onPointerMove={queuePointerMove}
       onPointerUp={finishGesture} onPointerCancel={cancelGesture} onLostPointerCapture={cancelGesture}>
       <rect width={WIDTH} height={sheetHeight} fill="#fff" data-paper="" />
+      {exportWarnings.length > 0 && <g data-export-note="" display="none" aria-hidden="true" fill="#77511d" fontSize="15">
+        {exportWarnings.map((message, index) => <text key={message} x={32} y={sheetHeight + 20 + index * 20}>{message}</text>)}
+      </g>}
       {style.showTitle !== false && chartText('title', pieChart?.center.x ?? (hasAxes ? (plot.left + plot.right) / 2 : WIDTH / 2), 63,
         '图表标题', { width: 440, max: 27 })}
-      {pieChart && <PieGraphic chart={chart} layout={pieChart} selection={selection} editable={tool === 'select'} onEdit={onEdit} onSelect={onSelect}
-        renderDatum={datumNode} />}
-      {pictograph && <PictographGraphic chart={chart} selection={selection}
+      {pieChart && <PieGraphic chart={chart} layout={pieChart} selection={selection} highlight={highlight} editable={tool === 'select'} onEdit={onEdit} onSelect={onSelect}
+        canvasObject={canvasObject} onEditObject={onEditObject} renderDatum={datumNode} />}
+      {pictograph && <PictographGraphic chart={chart} selection={selection} highlight={highlight}
         editable={tool === 'select'} eraseData={eraseData} onSelect={onSelect} onEdit={onEdit}
-        onEditLegend={onEditPictographLegend} renderDatum={datumNode}
+        canvasObject={canvasObject} onEditLegend={onEditPictographLegend} renderDatum={datumNode}
         renderCategory={(index, x, y, maxWidth, anchor, autoSize, cellHeight) => (
           chartText(index, x, y, '类别', { maxWidth, anchor, autoSize, cellHeight })
         )} />}
@@ -848,8 +1116,8 @@ function ChartDisplay({
             {style.grid && <line x1={plot.left} y1={y} x2={plot.right} y2={y} stroke="#e2e7f1" />}
             {showY && yAxis.tickLength > 0 && <line x1={plot.left - yTickFrom} x2={plot.left - yTickTo} y1={y} y2={y}
               stroke={yAxis.color} data-axis-tick="y" data-tick-value={value} />}
-            {showY && yAxis.showValues && <text x={plot.left - yTickTo - 8} y={y + yTickSize / 3} textAnchor="end"
-              fontSize={yTickSize} data-custom-size={yAxis.tickMode !== 'auto' ? '' : undefined} fill="#4e5b73">{formatValue(value)}</text>}
+            {yTickLabels?.has(value) && <text x={plot.left - yTickTo - 8} y={y + yTickSize / 3} textAnchor="end"
+              fontSize={yTickSize} data-custom-size="" data-tick-label="y" fill="#4e5b73">{formatValue(value)}</text>}
           </g>
         );
       })}
@@ -877,7 +1145,7 @@ function ChartDisplay({
       )}
       {hasAxes && style.showOrigin && (
         <text data-origin="" x={plot.left - yTickTo - 8} y={zero + yTickSize / 3} textAnchor="end"
-          fontSize={yTickSize} data-custom-size={yAxis.tickMode !== 'auto' ? '' : undefined} fill="#4e5b73">0</text>
+          fontSize={yTickSize} data-custom-size="" fill="#4e5b73">0</text>
       )}
       {showX && chart.categories.map((_, index) => {
         if (index % xTickEvery !== 0) return null;
@@ -895,17 +1163,28 @@ function ChartDisplay({
         );
       })}
       {chart.kind === 'line' && dataGraphics}
-      {hasAxes && (style.legend === true || style.legend === 'auto' && visibleSeries.length > 1) && (
-        <g transform={`translate(${legendLeft} ${legendTop})`} aria-label="图例">
-          {visibleSeries.slice(0, legendLimit).map((series, index) => {
-            const x = index % legendColumns * 92;
-            const y = 8 + Math.floor(index / legendColumns) * 16;
-            const label = index === legendLimit - 1 && visibleSeries.length > legendLimit
-              ? `… +${visibleSeries.length - index}` : shorten(series.name, 5);
+      {placedValues.length > 0 && <g pointerEvents="none">
+        {placedValues.map(({ key, x, y, text, fill, halo }) => (
+          <text key={key} x={x} y={y} textAnchor="middle" fontSize={VALUE_FONT_SIZE} data-custom-size=""
+            data-value-label="" fontWeight="650" fill={fill} stroke={halo ? '#fff' : undefined} strokeWidth={halo ? 3 : undefined}
+            paintOrder="stroke" strokeLinejoin="round">{text}</text>
+        ))}
+      </g>}
+      {legend.length > 0 && (
+        <g aria-label="图例">
+          {legend.map(({ series, name, lines, x, y }, index) => {
+            const icon = columns ? series.style?.columnIcon : undefined;
             return (
-              <g key={index}>
-                <rect x={x} y={y - 9} width="12" height="7" rx="2" fill={series.color} />
-                <text x={x + 17} y={y - 1} fontSize="12" fill="#485861">{label}</text>
+              <g key={index} data-series-legend-entry="">
+                <title>{name}</title>
+                {icon
+                  ? <g transform={`translate(${x} ${y - 12})`}>
+                      <PictographIcon name={icon.symbol} color={series.color} colored={icon.colorMode === 'color'} outline={false} size={14} />
+                    </g>
+                  : <rect x={x} y={y - 9} width="12" height="7" rx="2" fill={series.color} />}
+                <text x={x + 18} y={y} fontSize={LEGEND_FONT_SIZE} data-custom-size="" fill="#485861">
+                  {lines.map((line, lineIndex) => <tspan key={lineIndex} x={x + 18} y={y + lineIndex * LEGEND_LINE_HEIGHT}>{line}</tspan>)}
+                </text>
               </g>
             );
           })}
@@ -919,7 +1198,7 @@ function ChartDisplay({
             const y = scale.y(value);
             const label = keys.map(key => STATISTIC_LABELS[key]).join(' / ') + ' ' + formatValue(value);
             return (
-              <g key={value} data-stat={keys[0]} role="button" tabIndex={0} aria-label={`添加${label}参考线`}
+              <g key={value} data-stat={keys[0]} role="button" {...canvasObject(`statistic:${value}`)} aria-label={`添加${label}参考线`}
                 onKeyDown={event => {
                   if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onAddStatistic(keys[0]); }
                 }}>
@@ -950,8 +1229,9 @@ function ChartDisplay({
             {(canSelect || eraseMarks) && <path d={path} fill="none" stroke="transparent"
               strokeWidth={Math.max(14, (mark.width ?? 3.5) + 9)} strokeLinecap="round" strokeLinejoin="round"
               className={canSelect ? 'line-hit' : undefined} role={canSelect ? 'button' : undefined}
-              tabIndex={canSelect ? 0 : undefined} aria-label={canSelect ? `选择线条 ${index + 1}` : undefined}
-              onFocus={canSelect ? () => onSelect({ kind: 'mark', index }) : undefined} data-mark={index} data-editor-only="" />}
+              {...(canSelect ? canvasObject(`mark:${index}`) : {})} aria-label={canSelect ? `选择线条 ${index + 1}` : undefined}
+              onFocus={canSelect ? () => onSelect({ kind: 'mark', index }) : undefined}
+              onKeyDown={canSelect ? event => handleMarkKey(event, index, mark) : undefined} data-mark={index} data-editor-only="" />}
           </g>
         );
       })}
@@ -960,18 +1240,31 @@ function ChartDisplay({
         const { x, y } = exercise ?? note.position;
         return chartText(note.id, x, y, exercise ? '问题' : '文字标注', { anchor: 'start', width: exercise ? 600 : 280, max: 90, exercise });
       })}
+      {newNote && tool === 'text' && chartText(newNote.id, newNote.position.x, newNote.position.y, '文字标注',
+        { width: 280, max: 90, pending: newNote })}
       <g data-editor-only="">
-        {tool === 'select' && (showX || showY) && <circle cx={plot.left} cy={zero} r={6} className="axis-handle plot-handle" data-axis-target="both">
+        {tool === 'select' && (showX || showY) && <g className="plot-handle" data-axis-target="both" role="button"
+          {...canvasObject('axis:origin', true)} aria-label="移动坐标系"
+          onFocus={() => onSelect({ kind: 'axis', axis: 'both' })} onKeyDown={event => handleAxisKey(event, 'both')}>
           <title>拖动原点移动坐标系</title>
-        </circle>}
+          <circle cx={plot.left} cy={zero} r={6} className="axis-handle" />
+        </g>}
         {tool === 'select' && ([['x', xEnd, showX], ['y', yEnd, showY]] as const).filter(([, , shown]) => shown).map(([axis, end]) => (
-          <circle key={axis} cx={end.x} cy={end.y} r={6} className={`axis-handle handle-${axis}`}
-            data-axis-end={axis}><title>拖动调整{axis === 'x' ? '横轴' : '纵轴'}长度</title></circle>
+          <g key={axis} data-axis-end={axis} role="button" {...canvasObject(`axis:${axis}`, true)}
+            aria-label={`调整${axis === 'x' ? '横轴' : '纵轴'}长度`}
+            onFocus={() => onSelect({ kind: 'axis', axis })} onKeyDown={event => handleAxisKey(event, axis)}>
+            <title>{`拖动调整${axis === 'x' ? '横轴' : '纵轴'}长度`}</title>
+            <circle cx={end.x} cy={end.y} r={6} className={`axis-handle handle-${axis}`} />
+          </g>
         ))}
         {markEditing && selectedMark?.type === 'line' &&
-          selectedMark.points.map((point, index) => (
-            <circle key={index} cx={point.x} cy={point.y} r={7} className="line-handle"
-              data-mark={selectedLine} data-endpoint={index}><title>{index === 0 ? '起点' : '终点'}</title></circle>
+          selectedMark.points.slice(0, 2).map((point, index) => (
+            <g key={index} data-mark={selectedLine} data-endpoint={index} role="button"
+              {...canvasObject(`mark:${selectedLine}:${index}`, true)} aria-label={index === 0 ? '移动标注线起点' : '移动标注线终点'}
+              onKeyDown={event => handleMarkKey(event, selectedLine, selectedMark, index)}>
+              <title>{index === 0 ? '起点' : '终点'}</title>
+              <circle cx={point.x} cy={point.y} r={7} className="line-handle" />
+            </g>
           ))}
         <g stroke="#526fea" strokeDasharray="5 5" strokeWidth="1" pointerEvents="none" className="alignment-guides">
           {guides.x !== undefined && <line x1={guides.x} y1="0" x2={guides.x} y2={HEIGHT} />}

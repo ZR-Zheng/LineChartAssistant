@@ -1,0 +1,40 @@
+.board-sidebar .board-list {
+  max-height: min(55dvh, 540px);
+  overflow: auto;
+  padding: 3px;
+  margin-inline: -3px;
+}
+
+.board-sidebar .board-item { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.board-thumbnail-frame { display: block; }
+.board-thumbnail-frame:empty { background: #f2f5fa; }
+.board-item .board-name {
+  min-height: 0;
+  overflow: hidden;
+  padding: 2px 0 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 650;
+}
+
+.board-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 5px;
+  min-height: 20px;
+  padding-inline-end: 25px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.board-project-menu > summary { display: flex; width: 100%; list-style: none; cursor: pointer; }
+.board-project-menu > summary::-webkit-details-marker { display: none; }
+.board-project-menu > summary svg { margin-inline-start: auto; }
+.board-project-menu[open] > summary svg { transform: rotate(180deg); }
+.board-project-actions { display: grid; gap: 2px; }
+.board-project-actions .board-clear { color: #933b32; }
+.board-project-actions .board-clear:hover { background: #fbeeea; }
+
+.studio-drawer .board-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.studio-drawer .board-card { width: auto; }

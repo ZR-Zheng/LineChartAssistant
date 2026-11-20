@@ -370,6 +370,13 @@ function round(value: number) {
   return Number.isFinite(rounded) ? rounded : value;
 }
 
+function offsetValue(value: number, change: number) {
+  const next = clamp(value + change, -Number.MAX_VALUE, Number.MAX_VALUE);
+  if (next === value) return value;
+  const rounded = round(next);
+  return Math.sign(rounded - value) === Math.sign(change) ? rounded : next;
+}
+
 const formatter = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 6 });
 const compactFormatter = new Intl.NumberFormat('zh-CN', { notation: 'scientific', maximumFractionDigits: 4 });
 
@@ -486,6 +493,24 @@ export function getScale(
     if (split.to !== 0) ticks.add(split.to);
   }
 
+  function yForValue(value: number) {
+    if (!split || value <= split.from) return plot.bottom - (value / unit - lower) / drawnSpan * drawHeight;
+    if (value >= split.to) return gapTop - (value / unit - breakTo) / drawnSpan * drawHeight;
+    return gapBottom - (value / unit - breakFrom) / (breakTo - breakFrom) * gap;
+  }
+
+  function valueForPosition(y: number) {
+    const band = split && y <= gapTop ? bands[1] : bands[0];
+    if (split && y >= gapTop && y <= gapBottom) {
+      return { band, value: y - gapTop <= gapBottom - y ? split.to : split.from, boundary: true };
+    }
+    const ratio = clamp((plot.bottom - y - (band === bands[1] ? gap : 0)) / drawHeight, 0, 1);
+    if (ratio === 1 && axis.maximum !== undefined) return { band, value: axis.maximum, boundary: true };
+    const normalized = band === bands[1] ? breakTo + (gapTop - Math.max(y, plot.top)) / drawHeight * drawnSpan
+      : lower + ratio * drawnSpan;
+    return { band, value: fromNormalized(normalized), boundary: false };
+  }
+
   return {
     extent: { min, max },
     limit,
@@ -498,29 +523,53 @@ export function getScale(
     includes(value: number) {
       return value >= lowerValue && value <= upperValue && !inBreak(value);
     },
-    y(value: number) {
-      if (!split || value <= split.from) return plot.bottom - (value / unit - lower) / drawnSpan * drawHeight;
-      if (value >= split.to) return gapTop - (value / unit - breakTo) / drawnSpan * drawHeight;
-      return gapBottom - (value / unit - breakFrom) / (breakTo - breakFrom) * gap;
-    },
+    y: yForValue,
     valueAt(y: number) {
-      const band = split && y <= gapTop ? bands[1] : bands[0];
-      if (split && y >= gapTop && y <= gapBottom) return y - gapTop <= gapBottom - y ? split.to : split.from;
-      const ratio = clamp((plot.bottom - y - (band === bands[1] ? gap : 0)) / drawHeight, 0, 1);
-      if (ratio === 1 && axis.maximum !== undefined) return axis.maximum;
-      const normalized = band === bands[1] ? breakTo + (gapTop - Math.max(y, plot.top)) / drawHeight * drawnSpan
-        : lower + ratio * drawnSpan;
-      const value = fromNormalized(normalized);
+      const { band, value, boundary } = valueForPosition(y);
+      if (boundary) return value;
       return increment > 0 ? clamp(round(Math.round(value / increment) * increment),
         band.min, band.max) : clamp(value, band.min, band.max);
     },
+    drag(value: number, deltaY: number) {
+      if (!deltaY) return value;
+      const visible = Math.min(value, limit);
+      const anchored = yForValue(visible);
+      const { value: before } = valueForPosition(anchored);
+      const { value: after, boundary } = valueForPosition(anchored + deltaY);
+      if (before === after) return value;
+      return boundary && visible === value ? after : offsetValue(value, after - before);
+    },
     nudge(value: number, direction: number) {
-      const next = round(clamp(value + (increment || Number.MIN_VALUE) * direction, -Number.MAX_VALUE, Number.MAX_VALUE));
+      const next = offsetValue(value, (increment || Number.MIN_VALUE) * direction);
       if (split && (inBreak(next) || direction > 0 && value === split.from && next === value
         || direction < 0 && value === split.to && next === value)) return direction > 0 ? split.to : split.from;
-      return Math.min(next, limit);
+      return next;
     },
   };
+}
+
+export function chartDataWarnings(chart: ChartDocument, scale?: ReturnType<typeof getScale> | null) {
+  const limit = hasChartAxes(chart.kind) ? chart.style.axes.y.maximum ?? Infinity : Infinity;
+  if (!Number.isFinite(limit) && !scale?.omission && chart.kind !== 'pie') return { clipped: 0, messages: [] };
+  const series = displayedSeries(chart);
+  let clipped = 0;
+  let omitted = 0;
+  let negative = 0;
+  for (const { values } of series) {
+    for (const value of values) {
+      if (value === null) continue;
+      if (value > limit) clipped++;
+      if (scale?.inBreak(value)) omitted++;
+      if (chart.kind === 'pie' && value < 0) negative++;
+    }
+  }
+  const messages = [
+    clipped ? `${clipped} 个数据值超出纵轴上限 ${formatValue(limit)}，超出部分未显示。` : '',
+    omitted && scale?.omission
+      ? `${omitted} 个数据值位于断轴省略区间（${formatValue(scale.omission.from)} 至 ${formatValue(scale.omission.to)}）。` : '',
+    negative ? `${negative} 个负值未绘制，占比按正数计算。` : '',
+  ].filter(Boolean);
+  return { clipped, messages };
 }
 
 export function categoryX(index: number, count: number, plot: Plot) {
