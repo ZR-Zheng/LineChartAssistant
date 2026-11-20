@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
-import { AXIS_LENGTHS, DEFAULT_AXIS_ARROWHEAD, DEFAULT_STYLE, clamp, isAxisArrowhead, isAxisBreak, isGroupWidth, isPieStyle } from '../chart';
+import { AXIS_LENGTHS, DEFAULT_AXIS_ARROWHEAD, DEFAULT_STYLE, clamp, isAxisArrowhead, isAxisBreak, isGroupWidth, isPieStyle, TEXT_FONTS, TEXT_SIZE } from '../chart';
 import { download } from '../downloads';
 import { isPictographStyle } from '../pictograph';
 import type { Axis, AxisStyle, ChartStyle } from '../types';
@@ -73,7 +73,11 @@ function presetAxis(axis: Axis, config: Preset['config']): AxisStyle {
     color: typeof color === 'string' && /^#[\da-f]{6}$/i.test(color) ? color : fallback.color,
     width: bounded(saved?.width, 1, 6, fallback.width),
     length: Math.round(bounded(saved?.length, range.min, range.max, fallback.length)),
-    tickPosition: tickPosition === 'inside' || tickPosition === 'cross' ? tickPosition : fallback.tickPosition,
+    tickPosition: tickPosition === 'inside' || tickPosition === 'outside' || tickPosition === 'cross' ? tickPosition : fallback.tickPosition,
+    ...(typeof saved?.tickLabelFont === 'string' && Object.hasOwn(TEXT_FONTS, saved.tickLabelFont)
+      && { tickLabelFont: saved.tickLabelFont }),
+    ...(typeof saved?.tickLabelSize === 'number' && Number.isFinite(saved.tickLabelSize)
+      && { tickLabelSize: Math.round(clamp(saved.tickLabelSize, TEXT_SIZE.min, TEXT_SIZE.max)) }),
     tickLength: bounded(tickLength, 0, 20, fallback.tickLength),
     tickMode: saved?.tickMode === 'auto' || saved?.tickMode === 'all' || saved?.tickMode === 'interval'
       ? saved.tickMode : validInterval ? 'interval' : 'auto',

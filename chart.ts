@@ -62,6 +62,7 @@ export const TEXT_FONTS: Record<TextFont, { label: string; family: string }> = {
   kai: { label: '楷体', family: '"KaiTi", "Kaiti SC", "STKaiti", serif' },
   mono: { label: '等宽', family: '"Consolas", "Menlo", monospace' },
 };
+export const DEFAULT_TICK_LABEL = { font: 'system', size: 15 } as const;
 export const MAX_MANUAL_TICKS = 500;
 export const STATISTIC_LABELS: Record<Statistic, string> = { max: '最大值', min: '最小值', mean: '平均值' };
 export const AXIS_TITLE_PLACEMENTS = {
@@ -89,7 +90,7 @@ const BASE_AXIS: AxisStyle = {
   width: 1.6,
   length: DEFAULT_PLOT.right - DEFAULT_PLOT.left,
   tickLength: 5,
-  tickPosition: 'outside',
+  tickPosition: 'inside',
   tickMode: 'auto',
   interval: 1,
   showValues: true,
@@ -153,6 +154,14 @@ export function setChartValue(document: ChartDocument, seriesIndex: number, inde
   };
 }
 
+export function appendCategory(chart: ChartDocument): ChartDocument {
+  return {
+    ...chart,
+    categories: [...chart.categories, `类别 ${chart.categories.length + 1}`],
+    series: chart.series.map(series => ({ ...series, values: [...series.values, null] })),
+  };
+}
+
 export function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
@@ -174,33 +183,94 @@ export function isLightColor(color: string) {
   return red * 0.299 + green * 0.587 + blue * 0.114 > 155;
 }
 
-export function constrainPlotOffset(style: ChartStyle, offset: Point) {
+export function tickOffsets({ tickLength, tickPosition }: AxisStyle): [number, number] {
+  if (tickPosition === 'cross') return [-tickLength / 2, tickLength / 2];
+  if (tickPosition === 'inside') return [-tickLength, 0];
+  return [0, tickLength];
+}
+
+type PlotLayout = Pick<ChartDocument, 'style' | 'categories' | 'textStyles' | 'plotOffset'>;
+
+function plotLayout(source: ChartStyle | PlotLayout): PlotLayout {
+  return 'style' in source ? source : { style: source, categories: [], textStyles: {}, plotOffset: { x: 0, y: 0 } };
+}
+
+export function categoryTickLayout(chart: Pick<PlotLayout, 'style' | 'categories'>) {
+  const axis = chart.style.axes.x;
+  const count = Math.max(1, chart.categories.length);
+  const automatic = Math.ceil(count / Math.max(1, Math.floor(axis.length / 58)));
+  const step = axis.tickMode === 'all' ? 1 : axis.tickMode === 'interval' ? axis.interval : automatic;
+  const band = axis.length / count * Math.min(step, count);
+  const size = axis.tickLabelSize ?? DEFAULT_TICK_LABEL.size;
+  const angled = band < 44 && chart.categories.some((category, index) =>
+    index % step === 0 && Array.from(category).length * size > band - 6);
+  const [, outside] = tickOffsets(axis);
   return {
-    x: clamp(offset.x, 62 - DEFAULT_PLOT.left, WIDTH - DEFAULT_PLOT.left - style.axes.x.length - 20),
-    y: clamp(offset.y, 84 - (DEFAULT_PLOT.bottom - style.axes.y.length), HEIGHT - DEFAULT_PLOT.bottom - 118),
+    step, band, angled,
+    width: angled ? 44 : Math.max(8, band - 4),
+    labelOffset: angled ? Math.max(18, outside + 12) : Math.max(28, outside + 18),
   };
 }
 
-export function getPlot(style: ChartStyle, offset: Point = { x: 0, y: 0 }): Plot {
-  const { x, y } = constrainPlotOffset(style, offset);
+function xTitleOffset(axis: AxisStyle) {
+  return axis.titlePlacement === 'start' || axis.titlePlacement === 'center' ? 65 : 28;
+}
+
+function plotBottomInset(chart: PlotLayout) {
+  const { x, y } = chart.style.axes;
+  let extent = chart.style.showOrigin || y.visible !== false && y.showValues
+    ? (y.tickLabelSize ?? DEFAULT_TICK_LABEL.size) / 2 : 0;
+  if (x.visible !== false) {
+    extent = Math.max(extent, tickOffsets(x)[1]);
+    if (x.showLabel) extent = Math.max(extent, xTitleOffset(x) + getTextStyle(chart, 'xLabel').size * 0.3);
+    if (x.showValues) {
+      const { step, angled, width, labelOffset } = categoryTickLayout(chart);
+      let size = x.tickLabelSize ?? DEFAULT_TICK_LABEL.size;
+      for (const [target, style] of Object.entries(chart.textStyles)) {
+        if (/^\d+$/.test(target) && Number(target) < chart.categories.length && Number(target) % step === 0) {
+          size = Math.max(size, style.size ?? 0);
+        }
+      }
+      const descent = size * 0.3;
+      extent = Math.max(extent, labelOffset + descent + (angled ? Math.max(width, size) * Math.sin(Math.PI / 3) : 0));
+    }
+  }
+  return Math.ceil(extent) + 12;
+}
+
+export function constrainPlotOffset(source: ChartStyle | PlotLayout, offset: Point) {
+  const chart = plotLayout(source);
+  const { x, y } = chart.style.axes;
+  const minY = 84 - (DEFAULT_PLOT.bottom - y.length);
+  const maxY = Math.max(minY, HEIGHT - DEFAULT_PLOT.bottom - plotBottomInset(chart));
+  return {
+    x: clamp(offset.x, 62 - DEFAULT_PLOT.left, WIDTH - DEFAULT_PLOT.left - x.length - 20),
+    y: clamp(offset.y, minY, maxY),
+  };
+}
+
+export function getPlot(source: ChartStyle | PlotLayout, offset?: Point): Plot {
+  const chart = plotLayout(source);
+  const { x, y } = constrainPlotOffset(chart, offset ?? chart.plotOffset);
+  const { axes } = chart.style;
   return {
     left: DEFAULT_PLOT.left + x,
-    right: DEFAULT_PLOT.left + x + style.axes.x.length,
-    top: DEFAULT_PLOT.bottom + y - style.axes.y.length,
+    right: DEFAULT_PLOT.left + x + axes.x.length,
+    top: DEFAULT_PLOT.bottom + y - axes.y.length,
     bottom: DEFAULT_PLOT.bottom + y,
   };
 }
 
 export function movePlot(chart: ChartDocument, offset: Point): ChartDocument {
-  const from = constrainPlotOffset(chart.style, chart.plotOffset);
-  const plotOffset = constrainPlotOffset(chart.style, offset);
+  const from = constrainPlotOffset(chart, chart.plotOffset);
+  const plotOffset = constrainPlotOffset(chart, offset);
   if (from.x === plotOffset.x && from.y === plotOffset.y) return chart;
   const labelPositions = { ...chart.labelPositions };
   for (const label of ['xLabel', 'yLabel'] as const) {
     const position = labelPositions[label];
     if (position) labelPositions[label] = {
       x: clamp(position.x + plotOffset.x - from.x, 6, WIDTH - 6),
-      y: clamp(position.y + plotOffset.y - from.y, 18, HEIGHT - 8),
+      y: clamp(position.y + plotOffset.y - from.y, 18, HEIGHT - Math.ceil(getTextStyle(chart, label).size * 0.3) - 6),
     };
   }
   return { ...chart, plotOffset, labelPositions };
@@ -216,11 +286,12 @@ export function axisTitleLayout(axis: Axis, plot: Plot, chart: ChartDocument, ze
     const x = plot.right + 20;
     const width = Math.min(25, Array.from(chart.xLabel || '横轴标题').length) * getTextStyle(chart, 'xLabel').size;
     const fits = x + width <= WIDTH - 6;
-    return { point: { x: fits ? x : WIDTH - 6, y: zero + 28 }, anchor: fits ? 'start' as const : 'end' as const, rotation: 0 };
+    return { point: { x: fits ? x : WIDTH - 6, y: zero + xTitleOffset(chart.style.axes.x) },
+      anchor: fits ? 'start' as const : 'end' as const, rotation: 0 };
   }
   const anchor = placement === 'center' ? 'middle' as const : 'start' as const;
   const center = (plot.left + plot.right) / 2;
-  const y = axis === 'x' ? plot.bottom + 65 : placement === 'center' ? (plot.top + plot.bottom) / 2
+  const y = axis === 'x' ? plot.bottom + xTitleOffset(chart.style.axes.x) : placement === 'center' ? (plot.top + plot.bottom) / 2
     : plot.top - Math.max(22, verticalAxisExtension(chart.style.axes.y) + 8);
   const x = axis === 'x' ? (placement === 'start' ? plot.left : center)
     : placement === 'center' ? Math.max(15, plot.left - 69) : plot.left - 45;
@@ -316,13 +387,17 @@ export function statistics(values: (number | null)[]): Record<Statistic, number>
   return { max, min, mean: magnitude ? clamp(sum / count * magnitude, min, max) : 0 };
 }
 
-export function getTextStyle(chart: ChartDocument, target: TextTarget): TextStyle {
+export function getTextStyle(chart: Pick<ChartDocument, 'textStyles'> & Partial<Pick<ChartDocument, 'kind' | 'style'>>,
+  target: TextTarget): TextStyle {
   const title = target === 'title';
+  const axisTitle = target === 'xLabel' || target === 'yLabel';
+  const categoryAxis = typeof target === 'number' && hasChartAxes(chart.kind) ? chart.style?.axes.x : undefined;
+  const defaultSize = title ? 29 : axisTitle ? 15 : isNote(target) ? 18 : categoryAxis ? DEFAULT_TICK_LABEL.size : 14;
   return {
-    font: 'system',
-    size: title ? 29 : isNote(target) ? 18 : 14,
+    font: categoryAxis?.tickLabelFont ?? DEFAULT_TICK_LABEL.font,
+    size: categoryAxis?.tickLabelSize ?? defaultSize,
     color: title ? '#1c2540' : '#485861',
-    bold: title,
+    bold: title || axisTitle,
     italic: false,
     underline: false,
     alignment: 'start',
@@ -492,6 +567,8 @@ export function getScale(
     if (split.from !== 0) ticks.add(split.from);
     if (split.to !== 0) ticks.add(split.to);
   }
+  const orderedTicks = [...ticks].sort((a, b) => a - b);
+  const snapTicks = [0, ...orderedTicks];
 
   function yForValue(value: number) {
     if (!split || value <= split.from) return plot.bottom - (value / unit - lower) / drawnSpan * drawHeight;
@@ -514,7 +591,7 @@ export function getScale(
   return {
     extent: { min, max },
     limit,
-    ticks: [...ticks].sort((a, b) => a - b),
+    ticks: orderedTicks,
     bands,
     inBreak,
     omission: split ? { ...split, top: gapTop, bottom: gapBottom } : null,
@@ -524,9 +601,21 @@ export function getScale(
       return value >= lowerValue && value <= upperValue && !inBreak(value);
     },
     y: yForValue,
-    valueAt(y: number) {
+    valueAt(y: number, snapToTick = false) {
       const { band, value, boundary } = valueForPosition(y);
       if (boundary) return value;
+      if (snapToTick) {
+        let nearest: number | undefined;
+        let distance = Infinity;
+        for (const tick of snapTicks) {
+          if (tick < band.min || tick > band.max) continue;
+          const delta = Math.abs(y - yForValue(tick));
+          if (delta >= distance) continue;
+          nearest = tick;
+          distance = delta;
+        }
+        if (nearest !== undefined) return nearest;
+      }
       return increment > 0 ? clamp(round(Math.round(value / increment) * increment),
         band.min, band.max) : clamp(value, band.min, band.max);
     },

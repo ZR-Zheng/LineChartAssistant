@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { FocusEvent, KeyboardEvent, PointerEvent, ReactNode, RefObject } from 'react';
-import { AXIS_LENGTHS, axisTitleLayout, categoryX, chartDataWarnings, clamp, constrainPlotOffset, DEFAULT_AXIS_ARROWHEAD, DEFAULT_GROUP_WIDTH,
-  displayedSeries, exerciseNoteLayout, FONT, formatValue, getPlot, getScale, getSeriesStyle, getTextStyle, hasChartAxes, HEIGHT,
+import { AXIS_LENGTHS, axisTitleLayout, categoryTickLayout, categoryX, chartDataWarnings, clamp, constrainPlotOffset, DEFAULT_AXIS_ARROWHEAD, DEFAULT_GROUP_WIDTH,
+  DEFAULT_TICK_LABEL, displayedSeries, estimateTextWidth, exerciseNoteLayout, FONT, formatValue, getPlot, getScale, getSeriesStyle, getTextStyle, hasChartAxes, HEIGHT,
   hideText, isLightColor, isNote, markPath, movePlot, removeNote, setChartValue, shorten,
-  STATISTIC_LABELS, TEXT_FONTS, textValue, verticalAxisExtension, visibleMark, WIDTH } from '../chart';
+  STATISTIC_LABELS, TEXT_FONTS, textValue, tickOffsets, verticalAxisExtension, visibleMark, WIDTH } from '../chart';
 import type { Plot } from '../chart';
-import { layoutSeriesLegend, LEGEND_FONT_SIZE, LEGEND_LINE_HEIGHT, placeValueLabels, spacedTickLabels, VALUE_FONT_SIZE } from '../chartPresentation';
+import { columnIconRows, layoutSeriesLegend, LEGEND_FONT_SIZE, LEGEND_LINE_HEIGHT, placeValueLabels, spacedTickLabels, VALUE_FONT_SIZE } from '../chartPresentation';
 import { arrowOffset, NO_TARGETS, snapEndpoint, snapPoint, translateLine } from '../alignment';
 import type { Guides, SnapTargets } from '../alignment';
 import { movePie, pieLayout, pieMoveBounds, resetPieLegend } from '../pieLayout';
@@ -56,6 +56,7 @@ interface Props {
   eraseScope?: EraseScope;
   newTextStyle?: Partial<TextStyle>;
   snap?: boolean;
+  snapAddedPoint?: boolean;
   selection?: Selection | null;
   onSelect?: (selection: Selection | null) => void;
   highlight?: DataHighlight | null;
@@ -66,7 +67,6 @@ interface Props {
   onAddStatistic?: (statistic: Statistic) => void;
   onEditPictographLegend?: () => void;
   onEditObject?: (selection: Selection, trigger: SVGElement) => void;
-  panMode?: boolean;
   onEdit?: ChartEdit;
   svgRef?: RefObject<SVGSVGElement | null>;
 }
@@ -96,18 +96,17 @@ function SeriesDot({ x, y, size, color, width, shape, fill }: {
   return <circle cx={x} cy={y} r={size} {...paint} />;
 }
 
-function ColumnIcons({ symbolId, x, top, bottom, maxSize, pitch, negative }: {
-  symbolId: string; x: number; top: number; bottom: number; maxSize: number; pitch: number; negative: boolean;
+function ColumnIcons({ symbolId, x, top, bottom, maxSize, rows }: {
+  symbolId: string; x: number; top: number; bottom: number; maxSize: number; rows: ReturnType<typeof columnIconRows>;
 }) {
-  const height = bottom - top;
-  const count = Math.max(1, Math.round(height / pitch));
-  const size = Math.min(maxSize, height / (count + (count - 1) * 0.12));
-  const step = count > 1 ? (height - size) / (count - 1) : 0;
-  const start = count === 1 && negative ? bottom - size : top;
   return <g data-column-icons="" aria-hidden="true">
-    {Array.from({ length: count }, (_, index) => (
-      <use key={index} href={`#${symbolId}`} x={x - size / 2} y={start + index * step} width={size} height={size} />
-    ))}
+    {rows.map(row => {
+      const start = Math.max(top, row.top);
+      const end = Math.min(bottom, row.bottom);
+      if (end - start <= 1e-6) return null;
+      const size = Math.min(maxSize, (end - start) * 0.86);
+      return <use key={row.top} href={`#${symbolId}`} x={x - size / 2} y={(start + end - size) / 2} width={size} height={size} />;
+    })}
   </g>;
 }
 
@@ -185,9 +184,9 @@ function alignmentTargets(document: ChartDocument, plot: Plot, scale: Scale, ski
 
 function ChartDisplay({
   document, tool = 'preview', ink = '#cb552e', inkWidth = 3.5, inkOpacity = 1, inkArrows = 'end', lineKind = 'solid',
-  eraseScope = 'marks', newTextStyle, snap = true,
+  eraseScope = 'marks', newTextStyle, snap = true, snapAddedPoint = false,
   selection = null, highlight, onSelect, activeSeries = 0, onSelectSeries, onOccupiedDataPoint, stats, onAddStatistic,
-  onEditPictographLegend, onEditObject, panMode = false, onEdit, svgRef,
+  onEditPictographLegend, onEditObject, onEdit, svgRef,
 }: Props) {
   const columnSymbolPrefix = `column-icon-${useId().replace(/[^a-z\d_-]/gi, '')}`;
   const selectedLine = selection?.kind === 'mark' ? selection.index : null;
@@ -223,7 +222,7 @@ function ChartDisplay({
     'data-canvas-adjusting': adjusting && focusedObject === key ? '' : undefined,
     'aria-description': adjustable ? adjusting && focusedObject === key
       ? '方向键调节，按 Escape 结束。' : '按 Enter 启用调节，或按 Alt 和方向键微调。' : undefined,
-    tabIndex: !panMode && focusedObject === key ? 0 : -1,
+    tabIndex: focusedObject === key ? 0 : -1,
   });
 
   const stopGesture = () => {
@@ -252,7 +251,7 @@ function ChartDisplay({
 
   useEffect(() => {
     if (tool !== 'preview') stopGesture();
-  }, [document, tool, panMode]);
+  }, [document, tool]);
 
   useEffect(() => {
     if (selectedText === null) setEditing(null);
@@ -324,7 +323,7 @@ function ChartDisplay({
   }
 
   function startGesture(event: PointerEvent<SVGSVGElement>) {
-    if (tool === 'preview' || panMode || !event.isPrimary || event.button !== 0 || gesture.current) return;
+    if (tool === 'preview' || !event.isPrimary || event.button !== 0 || gesture.current) return;
     const element = event.target as Element;
     if (element.closest('foreignObject')) return;
     const target = element.closest<SVGElement>('[data-datum], [data-mark], [data-editable], [data-move-text], [data-note], [data-axis-end], [data-axis-target], [data-stat], [data-pie-legend], [data-pictograph-legend], [data-pictograph-table-resize], [data-pictograph-category-resize], [data-pie-move]');
@@ -337,7 +336,7 @@ function ChartDisplay({
     if (editorRef.current !== event.currentTarget.ownerDocument.activeElement) {
       event.currentTarget.focus({ preventScroll: true });
     }
-    const plot = getPlot(document.style, document.plotOffset);
+    const plot = getPlot(document);
     const hasAxes = hasChartAxes(document.kind);
     const scale = hasAxes ? getScale(displayedSeries(document), document.scaleExtent, plot, document.style.axes.y) : getScale([]);
     const matrix = event.currentTarget.getScreenCTM();
@@ -412,7 +411,7 @@ function ChartDisplay({
       gesture.current = { ...base, type: 'axis', axis: target.dataset.axisEnd as Axis };
     } else if (target?.hasAttribute('data-axis-target')) {
       gesture.current = { ...base, type: 'plot', axis: target.dataset.axisTarget as Axis | 'both',
-        offset: constrainPlotOffset(document.style, document.plotOffset) };
+        offset: constrainPlotOffset(document, document.plotOffset) };
     } else if (indexOfMark !== undefined && (tool === 'line' || tool === 'select')) {
       const endpoint = target.dataset.endpoint === undefined ? null : Number(target.dataset.endpoint) as 0 | 1;
       const mark = visibleMark(document.marks[indexOfMark], plot, scale, document.kind);
@@ -451,7 +450,7 @@ function ChartDisplay({
       }
       gesture.current = { ...base, type: 'data', datum: selected, scale, value, moved: adding };
       onSelectSeries(selected.series);
-      if (adding) setPreview(setChartValue(document, selected.series, selected.index, scale.valueAt(point.y)));
+      if (adding) setPreview(setChartValue(document, selected.series, selected.index, scale.valueAt(point.y, snapAddedPoint && !event.altKey)));
     } else if (tool === 'text') {
       gesture.current = { ...base, type: 'newText' };
     } else {
@@ -490,7 +489,7 @@ function ChartDisplay({
       if (!current.moved && Math.abs(offset.y) < threshold) return;
       current.moved = true;
       const { datum, scale, value } = current;
-      const next = value === null ? scale.valueAt(point.y) : scale.drag(value, offset.y);
+      const next = value === null ? scale.valueAt(point.y, snapAddedPoint && !event.altKey) : scale.drag(value, offset.y);
       setPreview(setChartValue(current.base, datum.series, datum.index, next));
       return;
     }
@@ -739,11 +738,12 @@ function ChartDisplay({
   const singleBar = columns && !chart.groupedColumns;
   const visibleSeries = useMemo(() => displayedSeries(chart),
     [chart.kind, chart.groupedColumns, chart.series, chart.barSeries, chart.pieSeries, chart.pictographSeries]);
-  const plot = useMemo(() => getPlot(chart.style, chart.plotOffset), [chart.style, chart.plotOffset]);
+  const plot = useMemo(() => getPlot(chart), [chart.style, chart.plotOffset, chart.categories, chart.textStyles]);
   const { sheetHeight, entries: legend } = layoutSeriesLegend(chart, plot);
   const dragScale = gesture.current?.type === 'data' ? gesture.current.scale : null;
   const scale = useMemo(() => dragScale ?? (hasAxes ? getScale(visibleSeries, chart.scaleExtent, plot, chart.style.axes.y) : getScale([])),
     [dragScale, hasAxes, visibleSeries, chart.scaleExtent, plot, chart.style.axes.y]);
+  const iconRows = useMemo(() => columns ? columnIconRows(scale) : [], [columns, scale]);
   const preview = tool === 'preview';
   const exportWarnings = useMemo(() => preview ? [] : chartDataWarnings(chart, scale).messages, [preview, chart, scale]);
   const count = chart.categories.length;
@@ -751,7 +751,6 @@ function ChartDisplay({
   const groupWidth = columns && chart.groupedColumns ? spacing * (chart.style.groupWidth ?? DEFAULT_GROUP_WIDTH)
     : Math.min(spacing * DEFAULT_GROUP_WIDTH, 54 * visibleSeries.length);
   const barWidth = groupWidth / visibleSeries.length;
-  const labelEvery = Math.ceil(count / Math.max(1, Math.floor((plot.right - plot.left) / 58)));
   const valueEvery = Math.max(1, Math.ceil(30 / spacing));
   const zero = scale.y(0);
   const { style } = chart;
@@ -760,13 +759,11 @@ function ChartDisplay({
   const { omission } = scale;
   const showX = hasAxes && xAxis.visible !== false;
   const showY = hasAxes && yAxis.visible !== false;
-  const xTickEvery = xAxis.tickMode === 'all' ? 1 : xAxis.tickMode === 'interval' ? xAxis.interval : labelEvery;
-  const categoryBand = spacing * Math.min(xTickEvery, count);
-  const angledCategories = categoryBand < 44 && chart.categories.some((category, index) => (
-    index % xTickEvery === 0 && Array.from(category).length * 14 > categoryBand - 6
-  ));
-  const yTickSize = 13;
-  const yTickLabels = showY && yAxis.showValues ? spacedTickLabels(scale.ticks, scale.y, style.showOrigin, omission) : null;
+  const { step: xTickEvery, band: categoryBand, angled: angledCategories, width: categoryLabelWidth, labelOffset: categoryLabelOffset } =
+    useMemo(() => categoryTickLayout(chart), [xAxis, chart.categories]);
+  const yTickSize = yAxis.tickLabelSize ?? DEFAULT_TICK_LABEL.size;
+  const yTickFont = TEXT_FONTS[yAxis.tickLabelFont ?? DEFAULT_TICK_LABEL.font].family;
+  const yTickLabels = showY && yAxis.showValues ? spacedTickLabels(scale.ticks, scale.y, style.showOrigin, omission, yTickSize) : null;
   const xEnd = { x: plot.right + 10, y: zero };
   const yEnd = { x: plot.left, y: plot.top - verticalAxisExtension(yAxis) };
   const xTitle = axisTitleLayout('x', plot, chart, zero);
@@ -793,7 +790,7 @@ function ChartDisplay({
     event.preventDefault();
     onEdit(current => {
       if (axis !== 'both') return resizeAxis(current, axis, axis === 'x' ? offset.x : -offset.y);
-      const currentOffset = constrainPlotOffset(current.style, current.plotOffset);
+      const currentOffset = constrainPlotOffset(current, current.plotOffset);
       return movePlot(current, { x: currentOffset.x + offset.x, y: currentOffset.y + offset.y });
     });
   }
@@ -844,6 +841,7 @@ function ChartDisplay({
     const available = Math.max(8, Math.min(maxWidth,
       rotation === -90 ? 2 * Math.min(y - 6, HEIGHT - 6 - y) : horizontalSpace));
     const preferredSize = typeof target === 'number' && customStyle?.size === undefined
+      && (!hasAxes || xAxis.tickLabelSize === undefined)
       ? Math.min(autoSize ?? textStyle.size, Math.max(5, rotation ? categoryBand * 0.85 : available / 2))
       : textStyle.size;
     const inCell = cellHeight !== undefined;
@@ -870,7 +868,7 @@ function ChartDisplay({
             {...(activate ? canvasObject(`text:${target}`) : {})}
             aria-label={activate ? `编辑${fallback}${text ? `：${text}` : ''}` : undefined}
             onFocus={activate ? () => onSelect({ kind: 'text', target }) : undefined}
-            onClick={panMode || axisLabel || note ? undefined : activate} onKeyDown={activate ? event => {
+            onClick={axisLabel || note ? undefined : activate} onKeyDown={activate ? event => {
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
                 startTextEditing(target, event.currentTarget);
@@ -950,10 +948,6 @@ function ChartDisplay({
     const columnIcon = columns ? seriesStyle.columnIcon : undefined;
     const symbolId = `${columnSymbolPrefix}-${seriesIndex}`;
     const iconSize = Math.min(48, columnWidth);
-    const preferredPitch = Math.max(24, iconSize + 4);
-    const tickSpacing = scale.tickSpacing;
-    const iconPitch = Number.isFinite(tickSpacing) && tickSpacing > 0
-      ? Math.max(24, tickSpacing / Math.ceil(tickSpacing / preferredPitch)) : preferredPitch;
     const lightColor = isLightColor(series.color);
     const flashing = highlight?.series === seriesIndex;
     const line = chart.kind === 'line' ? linePath(series.values, scale, plot) : null;
@@ -1019,7 +1013,7 @@ function ChartDisplay({
                   return <g key={top}>
                     {showIcon
                       ? <ColumnIcons symbolId={symbolId} x={x} top={top} bottom={bottom}
-                          maxSize={iconSize} pitch={iconPitch} negative={negativeBar} />
+                          maxSize={iconSize} rows={iconRows} />
                       : <rect x={x - columnWidth / 2} y={top - (value === 0 ? 1.5 : 0)} width={columnWidth}
                           height={Math.max(1.5, height)}
                           rx={seriesStyle.roundedColumns ? Math.min(4, barWidth * 0.1) : undefined} fill={series.color} />}
@@ -1063,15 +1057,20 @@ function ChartDisplay({
   });
   const placedValues = placeValueLabels(valueLabels, clippedLabels, WIDTH, plot.bottom + 5);
 
-  function tickOffset(axis: Axis) {
-    const { tickLength, tickPosition } = style.axes[axis];
-    if (tickPosition === 'cross') return [-tickLength / 2, tickLength / 2];
-    if (tickPosition === 'inside') return [-tickLength, 0];
-    return [0, tickLength];
-  }
+  const [xTickFrom, xTickTo] = tickOffsets(xAxis);
+  const [yTickFrom, yTickTo] = tickOffsets(yAxis);
+  const xTickDirection = zero - plot.top < 1e-6 ? -1 : 1;
 
-  const [xTickFrom, xTickTo] = tickOffset('x');
-  const [yTickFrom, yTickTo] = tickOffset('y');
+  function yValueLabel(value: number, origin = false) {
+    const label = formatValue(value);
+    const x = plot.left - yTickTo - 8;
+    const length = Math.max(1, x - 6);
+    const fit = estimateTextWidth(label, yTickSize) > length;
+    return <text x={x} y={scale.y(value)} textAnchor="end" dominantBaseline="central"
+      fontSize={yTickSize} fontFamily={yTickFont} data-custom-size="" fill="#4e5b73"
+      data-origin={origin ? '' : undefined} data-tick-label={origin ? undefined : 'y'}
+      textLength={fit ? length : undefined} lengthAdjust={fit ? 'spacingAndGlyphs' : undefined}>{label}</text>;
+  }
   const markEditing = tool === 'select' || tool === 'line';
   const marks = chart.marks.map(mark => visibleMark(mark, plot, scale, chart.kind));
   const selectedMark = selectedLine === null ? null : marks[selectedLine];
@@ -1085,11 +1084,11 @@ function ChartDisplay({
 
   return (
     <svg ref={attachCanvas} className={`chart-sheet tool-${tool}`} viewBox={`0 0 ${WIDTH} ${sheetHeight}`} data-chart-kind={chart.kind}
-      data-pan-mode={panMode || undefined} tabIndex={tool === 'preview' || panMode ? undefined : focusedObject ? -1 : 0}
+      tabIndex={tool === 'preview' ? undefined : focusedObject ? -1 : 0}
       role={tool === 'preview' ? undefined : 'group'} aria-label={tool === 'preview' ? undefined : '统计图画布'}
-      aria-description={tool === 'preview' || panMode ? undefined : '方向键切换对象，按 Enter 或空格编辑。按 Alt 和方向键微调数据和可移动对象。'}
+      aria-description={tool === 'preview' ? undefined : '方向键切换对象，按 Enter 或空格编辑。按 Alt 和方向键微调数据和可移动对象。'}
       aria-hidden={tool === 'preview' || undefined} fontFamily={FONT}
-      onFocus={tool === 'preview' || panMode ? undefined : focusCanvasObject} onKeyDownCapture={tool === 'preview' || panMode ? undefined : navigateCanvas}
+      onFocus={tool === 'preview' ? undefined : focusCanvasObject} onKeyDownCapture={tool === 'preview' ? undefined : navigateCanvas}
       onBlur={tool === 'preview' ? undefined : event => {
         if (!event.currentTarget.contains(event.relatedTarget)) setAdjusting(false);
       }}
@@ -1116,8 +1115,7 @@ function ChartDisplay({
             {style.grid && <line x1={plot.left} y1={y} x2={plot.right} y2={y} stroke="#e2e7f1" />}
             {showY && yAxis.tickLength > 0 && <line x1={plot.left - yTickFrom} x2={plot.left - yTickTo} y1={y} y2={y}
               stroke={yAxis.color} data-axis-tick="y" data-tick-value={value} />}
-            {yTickLabels?.has(value) && <text x={plot.left - yTickTo - 8} y={y + yTickSize / 3} textAnchor="end"
-              fontSize={yTickSize} data-custom-size="" data-tick-label="y" fill="#4e5b73">{formatValue(value)}</text>}
+            {yTickLabels?.has(value) && yValueLabel(value)}
           </g>
         );
       })}
@@ -1143,20 +1141,17 @@ function ChartDisplay({
           {showY && <line x1={plot.left} y1={plot.bottom} x2={plot.left} y2={yEnd.y} data-axis-target="y" />}
         </g>
       )}
-      {hasAxes && style.showOrigin && (
-        <text data-origin="" x={plot.left - yTickTo - 8} y={zero + yTickSize / 3} textAnchor="end"
-          fontSize={yTickSize} data-custom-size="" fill="#4e5b73">0</text>
-      )}
+      {hasAxes && style.showOrigin && yValueLabel(0, true)}
       {showX && chart.categories.map((_, index) => {
         if (index % xTickEvery !== 0) return null;
         const x = categoryX(index, count, plot);
         return (
           <g key={index}>
-            {xAxis.tickLength > 0 && <line x1={x} y1={zero + xTickFrom} x2={x} y2={zero + xTickTo}
+            {xAxis.tickLength > 0 && <line x1={x} y1={zero + xTickFrom * xTickDirection} x2={x} y2={zero + xTickTo * xTickDirection}
               stroke={xAxis.color} data-axis-tick="x" />}
             {xAxis.showValues && !chart.hiddenCategoryLabels?.includes(index) &&
-              chartText(index, x, plot.bottom + (angledCategories ? Math.max(18, xTickTo + 12) : Math.max(28, xTickTo + 18)), '类别', {
-                width: 100, maxWidth: angledCategories ? 44 : Math.max(8, categoryBand - 4),
+              chartText(index, x, plot.bottom + categoryLabelOffset, '类别', {
+                width: 100, maxWidth: categoryLabelWidth,
                 anchor: angledCategories ? 'end' : 'middle', rotation: angledCategories ? -60 : 0,
               })}
           </g>

@@ -21,7 +21,7 @@ export type ExerciseTopic = keyof typeof EXERCISE_TOPICS;
 export const EXERCISE_TYPES = {
   chart: '只生成图', random: '随机题型', reading: '读图取数', difference: '比较差值', total: '求总数',
   average: '求平均数', extremes: '找最大最小', trend: '分析变化', share: '读百分比',
-  compareGroups: '同类对比', compareTotals: '比较合计', symbolValue: '读图符',
+  compareGroups: '同类对比', compareTotals: '比较合计', symbolValue: '读图标',
 } as const;
 export type ExerciseType = keyof typeof EXERCISE_TYPES;
 type QuestionType = Exclude<ExerciseType, 'chart' | 'random'>;
@@ -240,7 +240,7 @@ function averageValues(count: number, random: () => number) {
 
 function question(type: QuestionType, categories: string[], random: () => number, kind: ChartKind) {
   switch (type) {
-    case 'symbolValue': return '一个完整的图符代表多少？半个图符代表多少？';
+    case 'symbolValue': return '一个完整的图标代表多少？半个图标代表多少？';
     case 'reading': {
       const [item] = draw(categories, 1, random);
       return `“${item}”对应的数值是多少？`;

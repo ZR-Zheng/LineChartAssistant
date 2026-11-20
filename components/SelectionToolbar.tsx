@@ -1,10 +1,10 @@
 import { RotateCcw, SlidersHorizontal, Tags, Trash2, X } from 'lucide-react';
 import { useId, useLayoutEffect, useRef, useState } from 'react';
-import { AXIS_LENGTHS, clamp, DEFAULT_GROUP_WIDTH, getSeriesStyle, movePlot, parseValue, pieColor, removeCategory, setChartValue, shorten } from '../chart';
+import { clamp, DEFAULT_GROUP_WIDTH, DEFAULT_TICK_LABEL, getSeriesStyle, movePlot, parseValue, pieColor,
+  removeCategory, setChartValue, shorten, TEXT_FONTS, TEXT_SIZE } from '../chart';
 import { DEFAULT_PICTOGRAPH_STYLE, pictographSymbolAt } from '../pictograph';
 import type { PictographSymbol } from '../pictographSymbols';
-import type { Axis, AxisStyle, ChartDocument, ChartEdit, DataHighlight, Datum, LineKind, PictographStyle, SeriesStyle } from '../types';
-import AxisArrowheadField from './AxisArrowheadField';
+import type { Axis, AxisStyle, ChartDocument, ChartEdit, DataHighlight, Datum, PictographStyle, SeriesStyle } from '../types';
 import PictographSymbolField from './PictographSymbolField';
 import ColorPicker from './ColorPicker';
 import ColumnIconField from './ColumnIconField';
@@ -71,19 +71,18 @@ function EditableField<T extends string | number | null>({ label, value, parse, 
   );
 }
 
-function NumberField({ label, value, onChange, minimum, normalize }: {
+function NumberField({ label, value, onChange, minimum, normalize, placeholder = minimum !== undefined ? '自动' : undefined }: {
   label: string; value: number | null | undefined; onChange: (value: number | null) => void;
-  minimum?: number; normalize?: (value: number) => number;
+  minimum?: number; normalize?: (value: number) => number; placeholder?: string;
 }) {
   return <EditableField label={label} value={value ?? null} onChange={onChange} numeric
-    placeholder={minimum !== undefined ? '自动' : undefined} parse={text => {
+    placeholder={placeholder} parse={text => {
       let number: number | null;
       try {
         number = parseValue(text);
       } catch {
         throw new Error('请输入有效数字。');
       }
-      if (number === null && normalize) throw new Error(`请输入${label}。`);
       if (number !== null && minimum !== undefined && number < minimum) throw new Error(`最小为 ${minimum}。`);
       return number !== null && normalize ? normalize(number) : number;
     }} />;
@@ -271,11 +270,12 @@ export function DataSelectionToolbar({ chart, datum, onEdit, onClose, onRemoveSe
   );
 }
 
-export function AxisSelectionToolbar({ chart, axis, onEdit, onClose, onSettings }: Props & {
+export function AxisSelectionToolbar({ chart, axis, onEdit, onSettings }: Omit<Props, 'onClose'> & {
   axis: Axis | 'both'; onSettings: (axis: Axis, trigger?: HTMLElement) => void;
 }) {
   const style = chart.style.axes[axis === 'both' ? 'x' : axis];
-  const mixedLine = axis === 'both' && chart.style.axes.x.line !== chart.style.axes.y.line;
+  const axisName = axis === 'both' ? '坐标系' : axis === 'x' ? '横轴' : '纵轴';
+  const values = axis === 'x' ? '标签' : '标值';
   const mixedWidth = axis === 'both' && chart.style.axes.x.width !== chart.style.axes.y.width;
 
   function update<Key extends keyof AxisStyle>(key: Key, value: AxisStyle[Key]) {
@@ -292,44 +292,52 @@ export function AxisSelectionToolbar({ chart, axis, onEdit, onClose, onSettings 
   }
 
   return (
-    <div className="drawing-toolbar text-toolbar" role="group" aria-label="所选坐标轴设置">
-      <span className="text-toolbar-name">{axis === 'both' ? '坐标系' : axis === 'x' ? '横轴' : '纵轴'}</span>
+    <div className="drawing-toolbar text-toolbar axis-selection-toolbar" role="group" aria-label={`${axisName}工具栏`}>
+      <span className="text-toolbar-name">{axisName}</span>
+      {axis !== 'both' && <>
+        <label>{values}字体
+          <select value={style.tickLabelFont ?? DEFAULT_TICK_LABEL.font}
+            onChange={event => update('tickLabelFont', event.target.value as AxisStyle['tickLabelFont'])}>
+            {Object.entries(TEXT_FONTS).map(([value, font]) => <option key={value} value={value}>{font.label}</option>)}
+          </select>
+        </label>
+        <NumberField label={`${values}字号`} value={style.tickLabelSize} placeholder={`默认 ${DEFAULT_TICK_LABEL.size}`}
+          normalize={value => clamp(Math.round(value), TEXT_SIZE.min, TEXT_SIZE.max)}
+          onChange={value => update('tickLabelSize', value ?? undefined)} />
+      </>}
+      <button className="button compact" onClick={event => onSettings(axis === 'both' ? 'x' : axis, event.currentTarget)}><SlidersHorizontal size={15} /> 坐标轴设置</button>
+      {axis !== 'both' && <>
+        <button className="button compact toolbar-toggle" aria-pressed={style.showValues}
+          onClick={() => update('showValues', !style.showValues)}>{axis === 'x' ? '类别标签' : '标值'}</button>
+        <button className="button compact toolbar-toggle" aria-pressed={style.showLabel}
+          onClick={() => update('showLabel', !style.showLabel)}>轴标题</button>
+        <button className="button compact toolbar-toggle" aria-pressed={style.visible !== false}
+          onClick={() => update('visible', style.visible === false)}>轴线</button>
+        <label>刻度位置
+          <select value={style.tickPosition} onChange={event => update('tickPosition', event.target.value as AxisStyle['tickPosition'])}>
+            <option value="inside">内侧</option><option value="outside">外侧</option><option value="cross">穿过轴线</option>
+          </select>
+        </label>
+      </>}
+      {axis === 'y' && <NumberField label="最大值" value={style.maximum} minimum={Math.max(0, style.omitted?.to ?? 0)}
+        onChange={value => update('maximum', value ?? undefined)} />}
+      <button className="button compact toolbar-toggle" aria-pressed={chart.style.grid}
+        onClick={() => onEdit(current => ({ ...current, style: { ...current.style, grid: !current.style.grid } }))}>网格线</button>
+      <button className="button compact toolbar-toggle" aria-pressed={chart.style.showOrigin}
+        onClick={() => onEdit(current => ({ ...current, style: { ...current.style, showOrigin: !current.style.showOrigin } }))}>原点 0</button>
       <div className="color-field"><span>轴线颜色</span>
         <ColorPicker value={style.color} label="所选轴线颜色" onChange={color => update('color', color)}
           mixed={axis === 'both' && chart.style.axes.x.color !== chart.style.axes.y.color} />
       </div>
-      <label>轴线样式
-        <select value={mixedLine ? '' : style.line} onChange={event => update('line', event.target.value as LineKind)}>
-          {mixedLine && <option value="" disabled>混合</option>}
-          <option value="arrow">带箭头</option><option value="solid">实线</option><option value="dashed">虚线</option>
-        </select>
-      </label>
-      <AxisArrowheadField style={chart.style} onEdit={onEdit} />
       <label>轴线宽度
         <select value={mixedWidth ? '' : style.width} onChange={event => update('width', Number(event.target.value))}>
           {mixedWidth && <option value="" disabled>混合</option>}
           {numericOptions([1, 1.6, 2, 3, 4, 5], style.width).map(width => <option value={width} key={width}>{width}</option>)}
         </select>
       </label>
-      {axis !== 'both' && <NumberField label="轴线长度" value={style.length} normalize={value => {
-        const { min, max } = AXIS_LENGTHS[axis];
-        return clamp(Math.round(value), min, max);
-      }} onChange={value => { if (value !== null) update('length', value); }} />}
-      {axis === 'y' && <NumberField label="最大值" value={style.maximum} minimum={Math.max(0, style.omitted?.to ?? 0)}
-        onChange={value => update('maximum', value ?? undefined)} />}
-      {axis !== 'both' && (
-        <>
-          <button className="button compact toolbar-toggle" aria-pressed={style.showValues}
-            onClick={() => update('showValues', !style.showValues)}>{axis === 'x' ? '类别标签' : '刻度标签'}</button>
-          <button className="button compact toolbar-toggle" aria-pressed={style.showLabel}
-            onClick={() => update('showLabel', !style.showLabel)}>轴标题</button>
-        </>
-      )}
-      <button className="button compact" onClick={event => onSettings(axis === 'both' ? 'x' : axis, event.currentTarget)}><SlidersHorizontal size={15} /> 坐标轴设置</button>
       {axis === 'both' && <button className="button compact" onClick={() => onEdit(chart => movePlot(chart, { x: 0, y: 0 }))}>
         <RotateCcw size={15} /> 还原位置
       </button>}
-      <button className="icon-button text-toolbar-close" aria-label="关闭所选坐标轴设置" onClick={onClose}><X size={17} /></button>
     </div>
   );
 }

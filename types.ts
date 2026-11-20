@@ -85,6 +85,8 @@ export interface AxisStyle {
   length: number;
   tickLength: number;
   tickPosition: 'outside' | 'inside' | 'cross';
+  tickLabelFont?: TextFont;
+  tickLabelSize?: number;
   tickMode: TickMode;
   interval: number;
   maximum?: number;

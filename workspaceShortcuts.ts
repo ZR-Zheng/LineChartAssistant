@@ -5,6 +5,6 @@ export function workspaceShortcutScope(target: EventTarget | null) {
   }
   if (element?.closest?.('.chart-sheet')) return 'canvas';
   if (element?.closest?.('.toolbar-strip')) return 'object';
-  if (element?.closest?.('.tool-rail, .canvas-view-controls, .desk[data-pan-mode]')) return 'tools';
+  if (element?.closest?.('.tool-rail, .canvas-view-controls')) return 'tools';
   return 'workspace';
 }

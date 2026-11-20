@@ -52,8 +52,8 @@ export default function PictographGraphic({ chart, selection, highlight, editabl
   const handleWidth = vertical ? 18 : 8;
   const handleHeight = vertical ? 8 : 18;
   const footerMessage = [
-    negative && '负值未绘制图符',
-    overflow && '图符数量超出显示容量，请提高每个图符代表的数量',
+    negative && '负值未绘制图标',
+    overflow && '图标数量超出显示容量，请提高每个图标代表的数量',
   ].filter(Boolean).join('；');
 
   return (
@@ -117,7 +117,7 @@ export default function PictographGraphic({ chart, selection, highlight, editabl
           </g>
         );
       })}
-      {style.showKey && <g aria-label={`图符图例：${legend.label}`} data-pictograph-legend=""
+      {style.showKey && <g aria-label={`图标图例：${legend.label}`} data-pictograph-legend=""
         transform={`translate(${legend.position.x} ${legend.position.y})`}
         role={editable ? 'button' : undefined} {...(editable ? canvasObject('pictograph:legend') : {})}
         aria-keyshortcuts={editable ? 'Enter Alt+ArrowLeft Alt+ArrowRight Alt+ArrowUp Alt+ArrowDown' : undefined}

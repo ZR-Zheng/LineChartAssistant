@@ -50,6 +50,8 @@ function BoardSidebar({ boards, activeId, deletedId, onSelect, onAdd, onDuplicat
         <div>
           <button className="icon-button" aria-label="新增画布" title="新增画布" onClick={onAdd}><Plus size={17} /></button>
           <button className="icon-button" aria-label="复制当前画布" title="复制当前画布" onClick={onDuplicate}><Copy size={16} /></button>
+          <button className="icon-button board-clear" aria-label="清空全部画布" title="清空全部画布"
+            disabled={replacementDisabled} onClick={onClear}><ListX size={17} /></button>
           {onClose && <button className="icon-button" aria-label="关闭画布列表" onClick={onClose}><X size={18} /></button>}
         </div>
       </div>
@@ -91,7 +93,6 @@ function BoardSidebar({ boards, activeId, deletedId, onSelect, onAdd, onDuplicat
               {archivedSources.map((source, index) => <button type="button" className="text-button" key={index}
                 onClick={() => onDownloadOriginal(source, index)}><Download size={14} /> 下载快照 {index + 1}</button>)}
             </details>}
-            <button className="text-button board-clear" disabled={replacementDisabled} onClick={onClear}><ListX size={14} /> 清空全部画布</button>
           </div>
         </details>
       </div>

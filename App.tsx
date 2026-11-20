@@ -1,13 +1,13 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import type { ChangeEvent, CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
-  ChartColumn, ChartNoAxesCombined, ChartPie, CirclePlus, Eraser, Grid2X2, Hand, Info, Magnet, Minus,
-  Layers, List, MousePointer2, MoveHorizontal, MoveRight, MoveUpRight, PanelTop, Pencil, Plus, Redo2, RotateCcw, Shapes, SlidersHorizontal, Table2, Tags, Trash2, TriangleAlert, Type, Undo2, X,
+  ChartNoAxesCombined, CirclePlus, Eraser, Grid2X2, Info, Magnet, Minus,
+  Layers, List, MousePointer2, MoveRight, MoveUpRight, PanelTop, Pencil, Plus, Redo2, RotateCcw, SlidersHorizontal, Table2, Tags, Trash2, TriangleAlert, Type, Undo2, X,
 } from 'lucide-react';
 import AxisPanel from './components/AxisPanel';
 import BoardSidebar from './components/BoardSidebar';
-import CanvasViewport from './components/CanvasViewport';
 import ChartDisplay from './components/ChartDisplay';
+import ChartKindPicker, { CHART_KIND_ICONS } from './components/ChartKindPicker';
 import ColumnIconField from './components/ColumnIconField';
 import ColorPicker from './components/ColorPicker';
 import DataPanel from './components/DataPanel';
@@ -23,7 +23,7 @@ import ToolbarStrip from './components/ToolbarStrip';
 import { boardReducer } from './boards';
 import type { Workspace } from './boards';
 import { CHART_KIND_LABELS } from './chartKindLabels';
-import { chartDataWarnings, clamp, displayedSeries, displayedSeriesField, formatValue, getPlot, getScale, getSeriesStyle, getTextStyle, hasChartAxes, hideText, isNote, MAX_MANUAL_TICKS,
+import { appendCategory, chartDataWarnings, clamp, displayedSeries, displayedSeriesField, formatValue, getPlot, getScale, getSeriesStyle, getTextStyle, hasChartAxes, hideText, isNote, MAX_MANUAL_TICKS,
   removeCategory, removeSeries, SERIES_COLORS, setChartValue, STATISTIC_LABELS, statistics, visibleMark } from './chart';
 import { download, exportChartImage, exportChartSvg } from './downloads';
 import { NO_TARGETS, translateLine } from './alignment';
@@ -51,16 +51,11 @@ const LINE_KINDS = [
   { id: 'solid', label: '实线' }, { id: 'dashed', label: '虚线' }, { id: 'arrow', label: '箭头线' },
 ] as const;
 const STATISTICS = ['max', 'min', 'mean'] as const;
-const CHART_KINDS = {
-  line: { label: CHART_KIND_LABELS.line, icon: ChartNoAxesCombined }, bar: { label: CHART_KIND_LABELS.bar, icon: ChartColumn },
-  pie: { label: CHART_KIND_LABELS.pie, icon: ChartPie }, pictograph: { label: CHART_KIND_LABELS.pictograph, icon: Shapes },
-} as const;
 const ERASER_OPTIONS = [
   { id: 'marks', label: '仅标注' }, { id: 'data', label: '仅数据' }, { id: 'all', label: '标注和数据' },
 ] as const;
 const TOOLBAR_PREFERENCE = 'chartToolbarVisible';
 const DATA_PANEL_PREFERENCE = 'chartDataPanelOpen';
-const FIT_WIDTH_PREFERENCE = 'chartCanvasFitWidth';
 const WIDE_WORKSPACE = '(min-width: 1200px)';
 const PANEL_WIDTH = { min: 280, max: 440, initial: 322 };
 // Leave room for the tool rail, desk padding, and 480px of paper.
@@ -90,10 +85,6 @@ function App() {
   const board = workspace.boards.find(item => item.id === workspace.activeId);
   const { chart, id, past, future, zoom } = board;
   const [tool, setTool] = useState<Tool>('select');
-  const [panMode, setPanMode] = useState(false);
-  const [fitWidth, setFitWidth] = useState(() => {
-    try { return localStorage.getItem(FIT_WIDTH_PREFERENCE) === 'true'; } catch { return false; }
-  });
   const [ink, setInk] = useState('#cb552e');
   const [inkWidth, setInkWidth] = useState(3.5);
   const [inkOpacity, setInkOpacity] = useState(1);
@@ -105,6 +96,7 @@ function App() {
   const [highlight, setHighlight] = useState<DataHighlight | null>(null);
   const [occupiedDataPoint, setOccupiedDataPoint] = useState(false);
   const [snap, setSnap] = useState(true);
+  const [snapAddedPoint, setSnapAddedPoint] = useState(false);
   const [toolbar, setToolbar] = useState(() => {
     try { return localStorage.getItem(TOOLBAR_PREFERENCE) !== 'false'; } catch { return true; }
   });
@@ -131,9 +123,12 @@ function App() {
   const pictographLegendInput = useRef<HTMLTextAreaElement>(null);
   const svg = useRef<SVGSVGElement>(null);
   const desk = useRef<HTMLDivElement>(null);
-  const panButton = useRef<HTMLButtonElement>(null);
   const canvasObject = useRef<SVGElement>(null);
+  const appShell = useRef<HTMLDivElement>(null);
+  const appHeader = useRef<HTMLElement>(null);
   const workspaceSection = useRef<HTMLElement>(null);
+  const workspaceTools = useRef<HTMLDivElement>(null);
+  const toolRail = useRef<HTMLElement>(null);
   const dataButton = useRef<HTMLButtonElement>(null);
   const settingsButton = useRef<HTMLButtonElement>(null);
   const boardButton = useRef<HTMLButtonElement>(null);
@@ -161,19 +156,20 @@ function App() {
   const inlinePanel = openPanel && (!narrowPanelLayout || dataView);
   const drawerContent = compact && boardDrawerOpen ? 'boards'
     : narrowPanelLayout && openPanel && openPanel !== 'data' ? 'settings' : null;
-  const ChartIcon = CHART_KINDS[chart.kind].icon;
+  const ChartIcon = CHART_KIND_ICONS[chart.kind];
   const availableExercises = exerciseTypes(chart.kind, grouped);
   const currentExercise = availableExercises.includes(exercise) ? exercise : 'chart';
   const values = chart.series[activeSeries].values;
   const stats = useMemo(() => statistics(values), [values]);
+  const emptyPointCount = useMemo(() => tool === 'add-data'
+    ? values.reduce((count, value) => count + (value === null ? 1 : 0), 0) : 0, [tool, values]);
   const onEdit: ChartEdit = update => dispatch({ type: 'edit', id, update });
   const { hint } = TOOLS.find(item => item.id === tool);
   const dataPanelOpen = panel === 'data';
   const pieHint = tool === 'select' ? '拖动扇形可移动图形和吸附的图注。点击扇区可改数值和颜色。' : tool === 'line' ? '拖动绘制标注线。' : hint;
-  const pictographHint = tool === 'select' ? '点击一行或一列可编辑图符和数值，也可直接拖动图例。' : tool === 'line' ? '拖动绘制标注线。' : hint;
-  const panHint = zoom > 100 ? '拖动以平移，也可以在画布视图中按方向键移动。' : '放大后可拖动或使用方向键平移。';
-  const chartHint = panMode ? panHint
-    : occupiedDataPoint ? '此处已有数值。可用「选择」拖动数据点，或在表格中修改。'
+  const pictographHint = tool === 'select' ? '点击一行或一列可编辑图标和数值，也可直接拖动图例。' : tool === 'line' ? '拖动绘制标注线。' : hint;
+  const chartHint = occupiedDataPoint ? '此处已有数值。可用「选择」拖动数据点，或在表格中修改。'
+    : tool === 'add-data' && emptyPointCount === 0 ? '当前系列已经填满。可先添加类别，再在画布上放置新点。'
       : tool === 'eraser' && eraseScope !== 'marks' ? '点击当前范围内的对象即可擦除。'
         : pie ? pieHint : pictograph ? pictographHint : hint;
   const { pointCount, otherDrawableSeries, hasEnteredData } = useMemo(() => {
@@ -211,10 +207,12 @@ function App() {
   const legendSelected = showLegend && (pie && selection?.kind === 'pie-legend'
     || pictograph && selection?.kind === 'pictograph-legend');
   const selectedObject = Boolean(mark || activeText !== null || activeDatum || axis || legendSelected);
-  const showObjectToolbar = !dataView && (tool === 'add-data' ? visibleSeries.length > 1 : tool !== 'select' || toolbar || selectedObject);
+  const showObjectToolbar = !dataView && (tool !== 'select' || toolbar || selectedObject);
+  const axisToolbar = !!axis && tool !== 'add-data' && tool !== 'text';
+  const closeObjectToolbar = (axisToolbar || activeDatum && tool !== 'add-data' && tool !== 'text') ? () => choose(null) : undefined;
   const yAxis = chart.style.axes.y;
   const needScale = yAxis.tickMode !== 'auto' || tool === 'line' || mark?.referenceValue !== undefined || yAxis.omitted;
-  const plot = useMemo(() => getPlot(chart.style, chart.plotOffset), [chart.style, chart.plotOffset]);
+  const plot = useMemo(() => getPlot(chart), [chart.style, chart.plotOffset, chart.categories, chart.textStyles]);
   const scale = useMemo(() => hasAxes && needScale ? getScale(visibleSeries, chart.scaleExtent, plot, yAxis) : null,
     [hasAxes, needScale, visibleSeries, chart.scaleExtent, plot, yAxis]);
   const { clipped, messages: dataWarnings } = useMemo(() => chartDataWarnings(chart, scale), [chart, scale]);
@@ -226,10 +224,6 @@ function App() {
   useEffect(() => {
     try { localStorage.setItem(TOOLBAR_PREFERENCE, String(toolbar)); } catch {}
   }, [toolbar]);
-
-  useEffect(() => {
-    try { localStorage.setItem(FIT_WIDTH_PREFERENCE, String(fitWidth)); } catch {}
-  }, [fitWidth]);
 
   useEffect(() => {
     const media = matchMedia(WIDE_WORKSPACE);
@@ -244,11 +238,26 @@ function App() {
   }, []);
 
   useLayoutEffect(() => {
+    const shell = appShell.current;
+    const header = appHeader.current;
     const section = workspaceSection.current;
-    if (!section) return;
-    setWorkspaceWidth(section.clientWidth);
-    const observer = new ResizeObserver(([entry]) => setWorkspaceWidth(Math.floor(entry.contentRect.width)));
+    const tools = workspaceTools.current;
+    const rail = toolRail.current;
+    if (!shell || !header || !section || !tools || !rail) return;
+    const heights = [
+      [header, '--app-header-height'], [tools, '--workspace-tools-height'], [rail, '--tool-rail-height'],
+    ] as const;
+    function measure() {
+      setWorkspaceWidth(section.clientWidth);
+      const measurements = heights.map(([element, property]) => [property, element.getBoundingClientRect().height] as const);
+      for (const [property, height] of measurements) {
+        shell.style.setProperty(property, `${height}px`);
+      }
+    }
+    measure();
+    const observer = new ResizeObserver(measure);
     observer.observe(section);
+    for (const [element] of heights) observer.observe(element, { box: 'border-box' });
     return () => observer.disconnect();
   }, []);
 
@@ -313,7 +322,8 @@ function App() {
   useLayoutEffect(() => {
     if (!panelFocusRequest || !openPanel) return;
     const section = workspaceSection.current;
-    if (dataView && section && section.getBoundingClientRect().top < 0) section.scrollIntoView({ block: 'start' });
+    const headerBottom = Math.max(0, appHeader.current?.getBoundingClientRect().bottom ?? 0);
+    if (dataView && section && section.getBoundingClientRect().top < headerBottom) section.scrollIntoView({ block: 'start' });
     if (openPanel === 'pictograph' && pictographTab === 'legend') {
       pictographLegendInput.current?.focus({ preventScroll: true });
     } else {
@@ -367,15 +377,13 @@ function App() {
     else svg.current?.focus();
   }
 
-  function resetCanvasZoom(fit: boolean) {
-    setFitWidth(fit);
+  function resetCanvasZoom() {
     dispatch({ type: 'zoom', id, value: 100 });
     desk.current?.scrollTo(0, 0);
   }
 
   function changeTool(next: Tool) {
     if (next === 'add-data' && !hasAxes) return;
-    setPanMode(false);
     choose(null);
     setTool(next);
     if (next === 'eraser') setEraseScope('marks');
@@ -648,9 +656,13 @@ function App() {
     dispatch({ type, id });
   }
 
-  function openAxes(axis: Axis = 'x', trigger?: HTMLElement) {
-    setOccupiedDataPoint(false);
+  function selectAxisTab(axis: Axis) {
     setAxisTab(axis);
+    choose({ kind: 'axis', axis });
+  }
+
+  function openAxes(axis: Axis = 'x', trigger?: HTMLElement) {
+    selectAxisTab(axis);
     openEditorPanel('axes', trigger);
     setTool('select');
   }
@@ -691,13 +703,6 @@ function App() {
         changeTool(next.id);
         return;
       }
-      if (panMode) {
-        if (key === 'escape') {
-          setPanMode(false);
-          panButton.current?.focus();
-        }
-        return;
-      }
       if (key === 'escape') {
         if (tool === 'add-data') changeTool('select');
         else choose(null);
@@ -720,7 +725,7 @@ function App() {
     }
     window.addEventListener('keydown', shortcuts);
     return () => window.removeEventListener('keydown', shortcuts);
-  }, [id, tool, hasAxes, dataView, panMode, mark, markIndex, activeDatum, activeText, axis, legendSelected, mark?.referenceValue === undefined ? null : chart]);
+  }, [id, tool, hasAxes, dataView, mark, markIndex, activeDatum, activeText, axis, legendSelected, mark?.referenceValue === undefined ? null : chart]);
 
   async function exportChart(format: 'PNG' | 'SVG') {
     if (!svg.current || exporting) return;
@@ -738,16 +743,31 @@ function App() {
 
   function toolSettings() {
     if (tool === 'add-data') return (
-      <div className="drawing-toolbar" role="group" aria-label="添加数据点设置">
-        <label className="ink-width">添加到
+      <div className="drawing-toolbar add-data-toolbar" role="group" aria-label="添加数据点设置">
+        {chart.series.length > 1 ? <label className="ink-width">目标系列
           <select value={activeSeries} onChange={event => selectSeries(Number(event.target.value))}>
             {chart.series.map((series, index) => <option key={index} value={index}>{series.name}</option>)}
           </select>
-        </label>
+        </label> : <span className="ink-width">目标系列
+          <span className="text-toolbar-name add-data-series-name" title={chart.series[activeSeries].name}>
+            {chart.series[activeSeries].name || '未命名系列'}
+          </span>
+        </span>}
+        <button className="button compact toolbar-toggle" aria-pressed={snapAddedPoint}
+          title="对齐到最近的纵轴刻度。按住 Alt 临时关闭吸附。" onClick={() => setSnapAddedPoint(!snapAddedPoint)}>
+          <Magnet size={15} /> 吸附刻度
+        </button>
+        <button className="button compact" onClick={() => {
+          onEdit(appendCategory);
+          choose(null);
+        }}>
+          <Plus size={15} /> 添加类别
+        </button>
+        <span className="data-entry-hint" role="status">剩余 {emptyPointCount} 个空位</span>
       </div>
     );
     if (legendSelected) return (
-      <div className="drawing-toolbar text-toolbar" role="group" aria-label={pie ? '所选扇形图图例' : '所选图符图例'}>
+      <div className="drawing-toolbar text-toolbar" role="group" aria-label={pie ? '所选扇形图图例' : '所选图标图例'}>
         <span className="text-toolbar-name">图例</span>
         <button className="button compact" onClick={event => {
           if (pie) {
@@ -788,7 +808,7 @@ function App() {
         onClose={() => choose(null)} onRemoveSeries={deleteSeries} onHighlight={setHighlight} />
     </Fragment>;
     if (axis) return <Fragment key={axis}>
-      <AxisSelectionToolbar chart={chart} axis={axis} onEdit={onEdit} onClose={() => choose(null)} onSettings={openAxes} />
+      <AxisSelectionToolbar chart={chart} axis={axis} onEdit={onEdit} onSettings={openAxes} />
     </Fragment>;
     if (tool === 'line' || tool === 'pen' || mark) return (
       <div className="drawing-toolbar" aria-label="标注设置" role="group">
@@ -864,11 +884,8 @@ function App() {
     );
     return (
       <div className="drawing-toolbar" aria-label="画布设置" role="group">
-        <button className="button quiet" aria-pressed={chart.style.showTitle !== false} onClick={() => onEdit(current => ({
-          ...current, style: { ...current.style, showTitle: current.style.showTitle === false },
-        }))}><Type size={16} /> 图表标题</button>
-        {(seriesField || grouped) && chart.series.length > 1 && <label className="ink-width">{seriesField ? '展示系列' : '编辑系列'}
-          <select aria-label={seriesField ? '展示系列' : '编辑系列'} value={activeSeries} onChange={event => selectSeries(Number(event.target.value))}>
+        {seriesField && chart.series.length > 1 && <label className="ink-width">展示系列
+          <select value={activeSeries} onChange={event => selectSeries(Number(event.target.value))}>
             {chart.series.map((series, index) => <option key={index} value={index}>{series.name}</option>)}
           </select>
         </label>}
@@ -878,8 +895,11 @@ function App() {
         {hasAxes && <button className="button quiet" aria-pressed={chart.style.grid} onClick={() => onEdit(current => ({
           ...current, style: { ...current.style, grid: !current.style.grid },
         }))}><Grid2X2 size={16} /> 网格线</button>}
+        <button className="button quiet" onClick={() => onEdit(current => ({
+          ...current, style: { ...current.style, showTitle: current.style.showTitle === false },
+        }))}><Type size={16} /> {chart.style.showTitle === false ? '显示标题' : '隐藏标题'}</button>
         <button className="button quiet" aria-pressed={showDataLabels} onClick={toggleDataLabels}><Tags size={16} /> {pie ? '扇区标签' : '数据标签'}</button>
-        <button className="button quiet" aria-pressed={showLegend} onClick={toggleLegend}><List size={16} /> {pictograph ? '图符图例' : '图例'}</button>
+        <button className="button quiet" aria-pressed={showLegend} onClick={toggleLegend}><List size={16} /> {pictograph ? '图标图例' : '图例'}</button>
         {pie && chart.piePosition && <button className="button quiet" onClick={() => onEdit(current => movePie(current))}>
           <RotateCcw size={16} /> 还原扇形位置</button>}
         {hasAxes && <button className="button quiet" aria-pressed={chart.style.showOrigin} onClick={() => onEdit(current => ({
@@ -897,7 +917,7 @@ function App() {
   </Fragment>;
 
   const settingsContent = openPanel === 'axes'
-    ? <AxisPanel axis={axisTab} onSelectAxis={setAxisTab} chart={chart} onEdit={onEdit} onClose={closeEditorPanel} />
+    ? <AxisPanel axis={axisTab} onSelectAxis={selectAxisTab} chart={chart} onEdit={onEdit} onClose={closeEditorPanel} />
     : openPanel === 'pie'
       ? <PieSettings chart={chart} onEdit={onEdit} onClose={closeEditorPanel} tab={pieTab} onSelectTab={setPieTab}
         showLabels={showDataLabels} showLegend={showLegend} onToggleLabels={toggleDataLabels} onToggleLegend={toggleLegend} />
@@ -917,8 +937,8 @@ function App() {
     onDownloadCheckpoint={checkpoint && !checkpoint.workspace ? () => downloadOriginal(checkpoint.source) : undefined} />;
 
   return (
-    <>
-      <header className="app-header">
+    <div className="app-shell" ref={appShell}>
+      <header className="app-header" ref={appHeader}>
         <div className="header-inner">
           <div className="brand">
             <span className="brand-icon"><ChartNoAxesCombined size={23} strokeWidth={2.2} /></span>
@@ -929,43 +949,40 @@ function App() {
             <ExportControls title={chart.title} exporting={exporting} onExportImage={() => exportChart('PNG')} onExportSvg={() => exportChart('SVG')} />
           </div>
         </div>
+        <div className="header-notices">
+          {error && <p className="app-error" role="alert">{error}</p>}
+          {(loadFailure || saveFailed || saveConflict) && <div className="project-notice">
+            <p role="alert">{saveConflict ? '另一个标签页更新了本机项目。本页已暂停自动保存。'
+              : loadFailure?.status === 'invalid'
+              ? '无法读取原项目。本机快照已保留，自动保存已暂停。'
+              : loadFailure?.status === 'unavailable'
+                ? '浏览器的本机存储不可用。请备份当前项目以保留改动。'
+                : '本机自动保存失败。请备份当前项目以保留改动。'}</p>
+            <div className="panel-actions">
+              {saveConflict && <button className="button compact" onClick={loadLatestProject}>载入本机最新版</button>}
+              {!saveConflict && loadFailure?.status === 'invalid' && <>
+                <button className="button compact" onClick={() => downloadOriginal(loadFailure.source)}>下载原始快照</button>
+                <button className="button compact" onClick={() => projectFile.current?.click()}>恢复项目</button>
+                <button className="button compact" onClick={clearBoards}>重置项目</button>
+              </>}
+              <button className="button compact" onClick={backupProject}>备份当前项目</button>
+            </div>
+          </div>}
+        </div>
       </header>
       <main className="main">
-        {error && <p className="app-error" role="alert">{error}</p>}
-        {(loadFailure || saveFailed || saveConflict) && <div className="project-notice">
-          <p role="alert">{saveConflict ? '另一个标签页更新了本机项目。本页已暂停自动保存。'
-            : loadFailure?.status === 'invalid'
-            ? '无法读取原项目。本机快照已保留，自动保存已暂停。'
-            : loadFailure?.status === 'unavailable'
-              ? '浏览器的本机存储不可用。请备份当前项目以保留改动。'
-              : '本机自动保存失败。请备份当前项目以保留改动。'}</p>
-          <div className="panel-actions">
-            {saveConflict && <button className="button compact" onClick={loadLatestProject}>载入本机最新版</button>}
-            {!saveConflict && loadFailure?.status === 'invalid' && <>
-              <button className="button compact" onClick={() => downloadOriginal(loadFailure.source)}>下载原始快照</button>
-              <button className="button compact" onClick={() => projectFile.current?.click()}>恢复项目</button>
-              <button className="button compact" onClick={clearBoards}>重置项目</button>
-            </>}
-            <button className="button compact" onClick={backupProject}>备份当前项目</button>
-          </div>
-        </div>}
         <div className="studio-layout" data-board-sidebar={!compact && boardListVisible || undefined}>
           <section className="workspace" ref={workspaceSection} aria-label="绘图工作区">
-            <div className="workspace-tools">
+            <div className="workspace-tools" ref={workspaceTools}>
             <div className="workspace-toolbar">
               <div className="toolbar-start">
-                <label className="chart-kind-select">
-                  <ChartIcon size={17} aria-hidden="true" />
-                  <select aria-label="图表类型" value={chart.kind} onChange={event => changeKind(event.target.value as ChartKind)}>
-                    {Object.entries(CHART_KINDS).map(([value, { label }]) => <option key={value} value={value}>{label}</option>)}
-                  </select>
-                </label>
+                <ChartKindPicker kind={chart.kind} onChange={changeKind} />
                 <button ref={dataButton} className="button primary edit-data-button" aria-expanded={dataPanelOpen}
                   aria-controls={dataPanelOpen ? 'data-panel' : undefined}
                   onClick={event => dataPanelOpen ? closeEditorPanel() : openEditorPanel('data', event.currentTarget)}>
                   {dataView ? <ChartIcon size={17} /> : <Table2 size={17} />} {dataView ? '返回画布' : '编辑数据'}
                 </button>
-                {chart.kind === 'bar' && <button className="button compact toolbar-toggle" aria-pressed={grouped}
+                {chart.kind === 'bar' && <button className="button toolbar-toggle" aria-pressed={grouped}
                   title="在普通柱状图和复式柱状图之间切换" onClick={toggleGroupedColumns}>复式柱状图</button>}
                 <div className="toolbar-group history" aria-label="编辑历史" role="group">
                   <button className="icon-button" aria-label="撤销" title="撤销（Ctrl / ⌘ + Z）" disabled={!past.length}
@@ -977,22 +994,13 @@ function App() {
                   onTopicChange={setTopic} onExerciseChange={setExercise} onGenerate={() => changeBoard('random')} />
               </div>
               <div className="toolbar-end">
-                {!dataView && <div className="canvas-view-controls" role="group" aria-label="画布视图控制">
-                  <div className="zoom-control" role="group" aria-label="画布缩放">
-                    <button className="icon-button" aria-label="缩小画布" disabled={zoom <= 50}
-                      onClick={() => dispatch({ type: 'zoom', id, value: -10, relative: true })}><Minus size={15} /></button>
-                    <button className="button quiet" title="还原缩放" aria-label={`缩放 ${zoom}%，点击还原`}
-                      onClick={() => resetCanvasZoom(false)}>{zoom}%</button>
-                    <button className="icon-button" aria-label="放大画布" disabled={zoom >= 200}
-                      onClick={() => dispatch({ type: 'zoom', id, value: 10, relative: true })}><Plus size={15} /></button>
-                  </div>
-                  <button className="button quiet" aria-pressed={fitWidth && zoom === 100} onClick={() => resetCanvasZoom(true)}>
-                    <MoveHorizontal size={16} /> 适合宽度
-                  </button>
-                  <button ref={panButton} className="button quiet" aria-pressed={panMode} onClick={() => {
-                    if (!panMode) choose(null);
-                    setPanMode(!panMode);
-                  }}><Hand size={16} /> 平移</button>
+                {!dataView && <div className="canvas-view-controls zoom-control" role="group" aria-label="画布缩放">
+                  <button className="icon-button" aria-label="缩小画布" disabled={zoom <= 50}
+                    onClick={() => dispatch({ type: 'zoom', id, value: -10, relative: true })}><Minus size={15} /></button>
+                  <button className="button quiet" title="还原缩放" aria-label={`缩放 ${zoom}%，点击还原`}
+                    onClick={resetCanvasZoom}>{zoom}%</button>
+                  <button className="icon-button" aria-label="放大画布" disabled={zoom >= 200}
+                    onClick={() => dispatch({ type: 'zoom', id, value: 10, relative: true })}><Plus size={15} /></button>
                 </div>}
                 {!dataView && <button className="button quiet" aria-pressed={toolbar} title={toolbar ? '收起画布的全局设置' : '展开画布的全局设置'}
                   onClick={() => setToolbar(!toolbar)}><PanelTop size={16} /> 画布设置</button>}
@@ -1007,40 +1015,41 @@ function App() {
               </div>
             </div>
               {showObjectToolbar && <ToolbarStrip context={`${chart.kind}:${tool}:${JSON.stringify(selection)}`}
-                onKeyDown={returnToCanvas} onClose={activeDatum && tool !== 'add-data' && tool !== 'text' ? () => choose(null) : undefined}>
+                onKeyDown={returnToCanvas} onClose={closeObjectToolbar} closeLabel={axisToolbar ? '关闭坐标轴工具栏' : undefined}>
                 {toolSettings()}
               </ToolbarStrip>}
+              {!dataView && <p className="canvas-tool-hint" role={occupiedDataPoint ? 'status' : undefined}>
+                <Info size={15} aria-hidden="true" /> {chartHint}
+              </p>}
+              {!dataView && notice && <div className="chart-notice">
+                <p role="status"><TriangleAlert size={16} aria-hidden="true" /> {notice}</p>
+                {(clipped || scale?.tooManyTicks) ? <button className="button compact" onClick={event => openAxes('y', event.currentTarget)}>调整纵轴</button>
+                  : <button className="button compact" onClick={event => openEditorPanel('data', event.currentTarget)}>查看图表数据</button>}
+              </div>}
             </div>
-            {!dataView && <p className="canvas-tool-hint" id="canvas-tool-hint" role={occupiedDataPoint || panMode ? 'status' : undefined}>
-              <Info size={15} aria-hidden="true" /> {chartHint}
-            </p>}
             <div className={`workspace-body${inlinePanel ? ' with-data' : ''}`} data-data-view={dataView || undefined}
               style={{ '--panel-width': `${effectivePanelWidth}px` } as CSSProperties}>
-              <nav className="tool-rail" aria-label="绘图工具" hidden={dataView}>
+              <nav className="tool-rail" ref={toolRail} aria-label="绘图工具" hidden={dataView}>
                 {TOOLS.filter(item => hasAxes || item.id !== 'add-data').map(({ id, label, icon: Icon, key }) => (
-                  <button key={id} className="tool-button" data-tool={id} aria-pressed={!panMode && tool === id} onClick={() => changeTool(id)}
+                  <button key={id} className="tool-button" data-tool={id} aria-pressed={tool === id} onClick={() => changeTool(id)}
                     title={`${label}（${key}）`} aria-label={label} aria-keyshortcuts={key}>
                     <Icon size={21} strokeWidth={1.8} /><span>{id === 'add-data' ? '添加点' : label}</span>
                   </button>
                 ))}
               </nav>
               <div className="canvas-stage" hidden={dataView}>
-                {notice && <div className="chart-notice">
-                  <p role="status"><TriangleAlert size={16} aria-hidden="true" /> {notice}</p>
-                  {(clipped || scale?.tooManyTicks) ? <button className="button compact" onClick={event => openAxes('y', event.currentTarget)}>调整纵轴</button>
-                    : <button className="button compact" onClick={event => openEditorPanel('data', event.currentTarget)}>查看图表数据</button>}
-                </div>}
-                <CanvasViewport viewportRef={desk} zoom={zoom} fitWidth={fitWidth} panMode={panMode}>
+                <div className="desk" ref={desk} data-zoomed={zoom > 100 || undefined}
+                  style={{ '--paper-zoom': zoom / 100 } as CSSProperties}>
                   <div className="paper-frame" key={`${projectRevision}:${id}:${chart.kind}`}>
                     <ChartDisplay document={chart} tool={tool} ink={currentInk} inkWidth={currentWidth}
                       inkOpacity={currentOpacity} inkArrows={currentArrows} newTextStyle={newTextStyle} eraseScope={eraseScope}
-                      lineKind={currentLineKind} snap={snap} selection={selection} highlight={highlight} onSelect={choose} onEditObject={editCanvasObject} panMode={panMode}
-                      onOccupiedDataPoint={() => setOccupiedDataPoint(true)} stats={stats} onAddStatistic={addStatistic}
+                      lineKind={currentLineKind} snap={snap} selection={selection} highlight={highlight} onSelect={choose} onEditObject={editCanvasObject}
+                      onOccupiedDataPoint={() => setOccupiedDataPoint(true)} snapAddedPoint={snapAddedPoint} stats={stats} onAddStatistic={addStatistic}
                       activeSeries={activeSeries} svgRef={svg} onEdit={onEdit} onSelectSeries={setSelectedSeries} onEditPictographLegend={() => openPictographLegend()} />
                   </div>
-                  {!hasDrawableData && tool === 'select' && !selectedObject && !panMode && <div className="empty-chart">
+                  {!hasDrawableData && tool === 'select' && !selectedObject && <div className="empty-chart">
                     <strong>{hasEnteredData ? '当前系列没有可绘制的数据' : '开始绘制统计图'}</strong>
-                    <p>{hasAxes ? '填写类别和数值，就能在画布上看到图表。' : `为${CHART_KINDS[chart.kind].label}填写至少一个正数。`}</p>
+                    <p>{hasAxes ? '填写类别和数值，就能在画布上看到图表。' : `为${CHART_KIND_LABELS[chart.kind]}填写至少一个正数。`}</p>
                     <div className="empty-chart-actions">
                       {otherDrawableSeries >= 0
                         ? <button className="button primary compact" onClick={() => {
@@ -1052,7 +1061,7 @@ function App() {
                       {!hasEnteredData && <button className="button compact" onClick={loadExample}>加载示例数据</button>}
                     </div>
                   </div>}
-                </CanvasViewport>
+                </div>
               </div>
               {inlinePanel && <div className="workspace-panel">
                 {!narrowPanelLayout && maxPanelWidth > PANEL_WIDTH.min && <div className="panel-resize" role="separator" tabIndex={0} aria-label="调整面板宽度"
@@ -1092,7 +1101,7 @@ function App() {
           {drawerContent === 'boards' ? boardList : settingsContent}
         </dialog>}
       </main>
-    </>
+    </div>
   );
 }
 

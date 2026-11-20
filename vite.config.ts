@@ -13,11 +13,14 @@ export default defineConfig(({ mode }) => {
       build: {
         rollupOptions: {
           output: { manualChunks: {
-            'pictograph-icons': ['./assets/fluent-pictographs.json'],
             'pictograph-activities': ['./assets/noto-pictographs-activities.json'],
             'pictograph-objects': ['./assets/noto-pictographs-everyday.json'],
             'pictograph-food': ['./assets/noto-pictographs-food.json'],
+            'pictograph-animals': ['./assets/noto-pictographs-animals.json'],
             'pictograph-nature': ['./assets/noto-pictographs-nature.json'],
+            'pictograph-transport': ['./assets/noto-pictographs-transport.json'],
+            'pictograph-places': ['./assets/noto-pictographs-places.json'],
+            'pictograph-symbols': ['./assets/noto-pictographs-symbols.json'],
           } },
         },
       },

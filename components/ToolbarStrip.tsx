@@ -2,8 +2,8 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import type { KeyboardEventHandler, ReactNode } from 'react';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 
-export default function ToolbarStrip({ context, children, onKeyDown, onClose }: {
-  context: string; children: ReactNode; onKeyDown?: KeyboardEventHandler<HTMLDivElement>; onClose?: () => void;
+export default function ToolbarStrip({ context, children, onKeyDown, onClose, closeLabel = '关闭数据点设置' }: {
+  context: string; children: ReactNode; onKeyDown?: KeyboardEventHandler<HTMLDivElement>; onClose?: () => void; closeLabel?: string;
 }) {
   const strip = useRef<HTMLDivElement>(null);
   const viewport = useRef<HTMLDivElement>(null);
@@ -62,7 +62,7 @@ export default function ToolbarStrip({ context, children, onKeyDown, onClose }: 
       {overflow && <button type="button" className="icon-button toolbar-scroll-button" aria-label="向右查看更多设置"
         title="向右查看更多设置" disabled={edges.end} onClick={() => scroll(1)}><ChevronRight size={16} /></button>}
       {onClose && <button type="button" className="icon-button toolbar-strip-close" ref={closeButton}
-        aria-label="关闭数据点设置" title="关闭数据点设置" onClick={onClose}><X size={17} /></button>}
+        aria-label={closeLabel} title={closeLabel} onClick={onClose}><X size={17} /></button>}
     </div>
   );
 }

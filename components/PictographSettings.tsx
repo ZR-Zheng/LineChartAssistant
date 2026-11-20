@@ -50,27 +50,27 @@ export default function PictographSettings({ chart, onEdit, onClose, onToggleLab
             </select>
           </label>
           <div className="axis-row">
-            <label>图符用法
+            <label>图标用法
               <select value={style.symbolMode} onChange={event => update({ symbolMode: event.target.value as PictographStyle['symbolMode'] })}>
-                <option value="shared">统一图符</option><option value="category">按类别设置</option>
+                <option value="shared">统一图标</option><option value="category">按类别设置</option>
               </select>
             </label>
             {style.colorMode === 'single' && <div className="axis-color color-field"><span>颜色</span>
-              <ColorPicker value={series.color} label="图符颜色" onChange={color => onEdit(current => ({
+              <ColorPicker value={series.color} label="图标颜色" onChange={color => onEdit(current => ({
                 ...current, series: current.series.map((item, index) => index === seriesIndex ? { ...item, color } : item),
               }))} />
             </div>}
           </div>
           {style.symbolMode === 'shared'
-            ? <PictographSymbolField label="图符" value={style.symbol} color={series.color} outline={style.outline} mode={style.colorMode}
+            ? <PictographSymbolField label="图标" value={style.symbol} color={series.color} outline={style.outline} mode={style.colorMode}
               onChange={symbol => update({ symbol })} onModeChange={colorMode => update({ colorMode })} />
             : <>
-              <label>图符配色
+              <label>图标配色
                 <select value={style.colorMode} onChange={event => update({ colorMode: event.target.value as PictographStyle['colorMode'] })}>
                   <option value="single">单色</option><option value="color">彩色</option>
                 </select>
               </label>
-              <small>选择画布上的行或列，在工具栏更换该类别的图符。</small>
+              <small>选择画布上的行或列，在工具栏更换该类别的图标。</small>
             </>}
           <div className="axis-row">
             <label>排列方向
@@ -78,7 +78,7 @@ export default function PictographSettings({ chart, onEdit, onClose, onToggleLab
                 <option value="horizontal">横排</option><option value="vertical">竖排</option>
               </select>
             </label>
-            <label>图符大小
+            <label>图标大小
               <select value={style.symbolSize} onChange={event => update({ symbolSize: Number(event.target.value) })}>
                 {[...new Set([18, 22, 26, 32, 38, style.symbolSize])].sort((a, b) => a - b)
                   .map(size => <option key={size} value={size}>{size} px</option>)}
@@ -86,7 +86,7 @@ export default function PictographSettings({ chart, onEdit, onClose, onToggleLab
             </label>
           </div>
           <div className="axis-row">
-            <label>每个图符代表
+            <label>每个图标代表
               <select value={style.unit === undefined ? 'auto' : 'fixed'} onChange={event => update({ unit: event.target.value === 'auto' ? undefined : unit })}>
                 <option value="auto">自动</option><option value="fixed">指定数量</option>
               </select>
@@ -108,19 +108,19 @@ export default function PictographSettings({ chart, onEdit, onClose, onToggleLab
                   if (next !== unitLabel) update({ unitLabel: next });
                 }} onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); }} />
             </label>
-            <label>图符间距
+            <label>图标间距
               <select value={style.symbolGap} onChange={event => update({ symbolGap: Number(event.target.value) })}>
                 {[...new Set([0, 3, 5, 8, 12, style.symbolGap])].sort((a, b) => a - b)
                   .map(gap => <option key={gap} value={gap}>{gap} px</option>)}
               </select>
             </label>
           </div>
-          <div className="panel-actions" role="group" aria-label="图符辅助显示">
+          <div className="panel-actions" role="group" aria-label="图标辅助显示">
             <button className="button compact" aria-pressed={getSeriesStyle(series, chart.style).showLabels} onClick={onToggleLabels}>数值标签</button>
             <button className="button compact" aria-pressed={style.guides} onClick={() => update({ guides: !style.guides })}>辅助线</button>
             <button className="button compact" aria-pressed={style.frame} onClick={() => update({ frame: !style.frame })}>表格边框</button>
             {style.colorMode === 'single' && <button className="button compact" aria-pressed={style.outline}
-              onClick={() => update({ outline: !style.outline })}>空心几何图符</button>}
+              onClick={() => update({ outline: !style.outline })}>空心几何图标</button>}
           </div>
           {style.frame && <>
             <div className="axis-row" role="group" aria-label="表格尺寸">
@@ -169,7 +169,7 @@ export default function PictographSettings({ chart, onEdit, onClose, onToggleLab
             {style.frameColor && <button className="button compact" onClick={() => update({ frameColor: undefined })}>恢复默认色</button>}
           </div>}
           <button className="button quiet" onClick={() => update(DEFAULT_PICTOGRAPH_SHAPE)}>
-            <RotateCcw size={15} /> 还原图符设置
+            <RotateCcw size={15} /> 还原图标设置
           </button>
         </>}
         {tab === 'legend' && <>
@@ -203,7 +203,7 @@ export default function PictographSettings({ chart, onEdit, onClose, onToggleLab
                 <option value="center">居中</option><option value="end">靠右</option>
               </select>
             </label>
-            <label>示例图符
+            <label>示例图标
               <select value={style.legendIcon} onChange={event => update({ legendIcon: event.target.value as PictographStyle['legendIcon'] })}>
                 <option value="auto">自动</option><option value="show">显示</option><option value="hide">隐藏</option>
               </select>

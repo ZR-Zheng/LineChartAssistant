@@ -15,7 +15,7 @@ export default function ColumnIconField({ label, series, index, onEdit, onHighli
   }
 
   return <PictographSymbolField label={label} value={icon?.symbol ?? null} color={series.color}
-    mode={icon?.colorMode ?? 'single'} outline={false}
+    mode={icon?.colorMode ?? 'color'} outline={false}
     onChange={(symbol, colorMode) => update({ symbol, colorMode })}
     onModeChange={colorMode => { if (icon) update({ ...icon, colorMode }); }}
     onReset={icon ? () => update(undefined) : undefined} resetLabel="恢复普通柱形" />;

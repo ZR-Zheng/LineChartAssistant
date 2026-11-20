@@ -1,6 +1,6 @@
 import { initialWorkspace } from './boards';
 import type { Board, Workspace } from './boards';
-import { AXIS_LENGTHS, EXERCISE_POSITION, isAxisArrowhead, isAxisBreak, isGroupWidth, isPieStyle, TEXT_FONTS } from './chart';
+import { AXIS_LENGTHS, EXERCISE_POSITION, isAxisArrowhead, isAxisBreak, isGroupWidth, isPieStyle, TEXT_FONTS, TEXT_SIZE } from './chart';
 import { isPictographStyle } from './pictograph';
 import { isPictographSymbol } from './pictographSymbols';
 import type { ChartDocument } from './types';
@@ -54,6 +54,9 @@ function axisStyle(axis: 'x' | 'y', value: unknown): boolean {
   return object(value) && oneOf(value.line, 'solid', 'dashed', 'arrow') && color(value.color) && positive(value.width)
     && number(value.length) && value.length >= range.min && value.length <= range.max
     && number(value.tickLength) && value.tickLength >= 0 && oneOf(value.tickPosition, 'outside', 'inside', 'cross')
+    && (value.tickLabelFont === undefined || text(value.tickLabelFont) && Object.hasOwn(TEXT_FONTS, value.tickLabelFont))
+    && (value.tickLabelSize === undefined || number(value.tickLabelSize) && Number.isInteger(value.tickLabelSize)
+      && value.tickLabelSize >= TEXT_SIZE.min && value.tickLabelSize <= TEXT_SIZE.max)
     && oneOf(value.tickMode, 'auto', 'all', 'interval') && positive(value.interval)
     && (axis === 'y' || Number.isSafeInteger(value.interval))
     && (value.maximum === undefined || number(value.maximum) && value.maximum >= 0)

@@ -1,11 +1,9 @@
 import { useEffect, useId, useState } from 'react';
 import { cachedPictographImage, loadPictographImage } from '../pictographAssets';
-import type { EmbeddedSymbol } from '../pictographAssets';
-import { PICTOGRAPH_SYMBOLS } from '../pictographSymbols';
 import type { PictographSymbol } from '../pictographSymbols';
 
-function EmbeddedImage({ name, filter }: { name: EmbeddedSymbol; filter?: string }) {
-  const [loaded, setLoaded] = useState<{ name: EmbeddedSymbol; href: string }>();
+function EmbeddedImage({ name, filter }: { name: PictographSymbol; filter?: string }) {
+  const [loaded, setLoaded] = useState<{ name: PictographSymbol; href: string }>();
   const href = loaded?.name === name ? loaded.href : cachedPictographImage(name);
 
   useEffect(() => {
@@ -25,7 +23,7 @@ function EmbeddedImage({ name, filter }: { name: EmbeddedSymbol; filter?: string
   );
 }
 
-function TintedIcon({ name, size, color }: { name: EmbeddedSymbol; size: number; color: string }) {
+function TintedIcon({ name, size, color }: { name: PictographSymbol; size: number; color: string }) {
   const filter = `pictograph-tint-${useId().replace(/[^a-z\d_-]/gi, '')}`;
   const rgb = Number.parseInt(color.slice(1), 16);
   const matrix = [16, 8, 0].map(shift => {
@@ -45,21 +43,26 @@ function TintedIcon({ name, size, color }: { name: EmbeddedSymbol; size: number;
   );
 }
 
+const outlinePaths: Partial<Record<PictographSymbol, string>> = {
+  circle: 'M22 12a10 10 0 1 0-20 0 10 10 0 1 0 20 0Z',
+  square: 'M3 3h18v18H3Z',
+  triangle: 'M12 3 22 21H2Z',
+  diamond: 'M12 2 22 12 12 22 2 12Z',
+  star: 'm12 2 3 6.5 7 .9-5 5 1.2 7-6.2-3.4-6.2 3.4L7 14.4l-5-5 7-.9Z',
+  heart: 'M12 21 4 13C-2 7 6 1 12 7c6-6 14 0 8 6Z',
+};
+
 export default function PictographIcon({ name, color, colored, outline, size = 24 }: {
   name: PictographSymbol; color: string; colored: boolean; outline: boolean; size?: number;
 }) {
-  if (name === 'soccer') {
-    const [, Soccer] = PICTOGRAPH_SYMBOLS.soccer;
-    const ink = colored ? '#202938' : color;
-    return <Soccer size={size} color={ink} style={{ color: ink }} aria-hidden="true" />;
-  }
+  const path = outline && !colored ? outlinePaths[name] : undefined;
+  if (path) return <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+    <path d={path} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" />
+  </svg>;
   if (colored) return (
     <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
       <EmbeddedImage name={name} />
     </svg>
   );
-  const [, Icon, group] = PICTOGRAPH_SYMBOLS[name];
-  if (!Icon) return <TintedIcon name={name} size={size} color={color} />;
-  const fill = group === 'shapes' && !outline ? color : 'none';
-  return <Icon size={size} color={color} fill={fill} strokeWidth={2} aria-hidden="true" />;
+  return <TintedIcon name={name} size={size} color={color} />;
 }

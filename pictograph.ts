@@ -18,7 +18,7 @@ export const DEFAULT_PICTOGRAPH_STYLE: PictographStyle = { ...DEFAULT_PICTOGRAPH
 
 export const PICTOGRAPH_PRESETS = {
   circles: { label: '竖排圆圈', style: { direction: 'vertical', symbol: 'circle', symbolMode: 'shared', outline: true, frame: false, guides: true } },
-  categories: { label: '按类别排图符', style: { direction: 'vertical', symbolMode: 'category', outline: true, frame: false, guides: true } },
+  categories: { label: '按类别排图标', style: { direction: 'vertical', symbolMode: 'category', outline: true, frame: false, guides: true } },
   table: { label: '横向对照表', style: { direction: 'horizontal', symbolMode: 'shared', outline: false, frame: true, guides: true } },
 } as const satisfies Record<string, { label: string; style: Partial<PictographStyle> }>;
 
@@ -184,7 +184,7 @@ function pictographGeometry(style: PictographStyle, desired: Point | undefined, 
   const categorySpace = vertical ? DEFAULT_CATEGORY_ROW_HEIGHT + 1 : 0;
   const amount = unit >= 1e12 || unit < 1e-5 ? String(unit) : keyFormatter.format(unit);
   const text = `表示 ${amount}${unitLabel ? ` ${unitLabel}` : ''}`;
-  const automaticText = style.symbolMode === 'category' ? `每个图符都${text}` : `每个图符${text}`;
+  const automaticText = style.symbolMode === 'category' ? `每个图标都${text}` : `每个图标${text}`;
   const label = style.legendText?.replaceAll('{数量}', () => amount).replaceAll('{单位}', () => unitLabel).trim() || automaticText;
   const showIcon = style.legendIcon === 'show' || style.legendIcon === 'auto' && style.symbolMode === 'shared';
   const iconSize = showIcon ? Math.round(style.legendFontSize * 1.375) : 0;

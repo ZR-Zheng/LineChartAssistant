@@ -1,41 +1,35 @@
-import { NOTO_PICTOGRAPH_SYMBOLS } from './notoPictographSymbols';
-import { isPictographSymbol } from './pictographSymbols';
+import { isPictographSymbol, PICTOGRAPH_SYMBOLS } from './pictographSymbols';
 import type { PictographSymbol } from './pictographSymbols';
 
-export type EmbeddedSymbol = Exclude<PictographSymbol, 'soccer'>;
-
 const loaders = {
-  fluent: () => import('./assets/fluent-pictographs.json').then(module => module.default.icons),
   activities: () => import('./assets/noto-pictographs-activities.json').then(module => module.default),
   objects: () => import('./assets/noto-pictographs-everyday.json').then(module => module.default),
   food: () => import('./assets/noto-pictographs-food.json').then(module => module.default),
+  animals: () => import('./assets/noto-pictographs-animals.json').then(module => module.default),
   nature: () => import('./assets/noto-pictographs-nature.json').then(module => module.default),
+  transport: () => import('./assets/noto-pictographs-transport.json').then(module => module.default),
+  places: () => import('./assets/noto-pictographs-places.json').then(module => module.default),
+  symbols: () => import('./assets/noto-pictographs-symbols.json').then(module => module.default),
 };
 
 type Library = keyof typeof loaders;
-type NotoSymbol = keyof typeof NOTO_PICTOGRAPH_SYMBOLS;
 const notoLibraries = {
-  school: 'objects', transport: 'objects', sports: 'activities', festivals: 'activities',
-  food: 'food', animals: 'nature', nature: 'nature',
-} satisfies Record<(typeof NOTO_PICTOGRAPH_SYMBOLS)[NotoSymbol][1], Library>;
+  school: 'objects', transport: 'transport', sports: 'activities', festivals: 'activities',
+  food: 'food', animals: 'animals', nature: 'nature', places: 'places', shapes: 'symbols', expressions: 'symbols',
+} satisfies Record<(typeof PICTOGRAPH_SYMBOLS)[PictographSymbol][1], Library>;
 
 const libraries = new Map<Library, Promise<Record<string, string>>>();
-const embeddedImages = new Map<EmbeddedSymbol, string>();
+const embeddedImages = new Map<PictographSymbol, string>();
 
-function libraryFor(name: EmbeddedSymbol): Library {
-  const noto = NOTO_PICTOGRAPH_SYMBOLS[name as NotoSymbol];
-  return noto ? notoLibraries[noto[1]] : 'fluent';
-}
-
-export function cachedPictographImage(name: EmbeddedSymbol) {
+export function cachedPictographImage(name: PictographSymbol) {
   return embeddedImages.get(name);
 }
 
-export async function loadPictographImage(name: EmbeddedSymbol) {
+export async function loadPictographImage(name: PictographSymbol) {
   const cached = embeddedImages.get(name);
   if (cached) return cached;
 
-  const library = libraryFor(name);
+  const library = notoLibraries[PICTOGRAPH_SYMBOLS[name][1]];
   let request = libraries.get(library);
   if (!request) {
     request = loaders[library]().catch(error => {
@@ -46,7 +40,7 @@ export async function loadPictographImage(name: EmbeddedSymbol) {
   }
 
   const artwork = (await request)[name];
-  if (!artwork) throw new Error(`无法加载图符 ${name}。`);
+  if (!artwork) throw new Error(`无法加载图标 ${name}。`);
 
   // Many chart cells can request the same icon while its library is loading.
   const image = embeddedImages.get(name) ?? `data:image/svg+xml,${encodeURIComponent(artwork)}`;
@@ -55,23 +49,17 @@ export async function loadPictographImage(name: EmbeddedSymbol) {
 }
 
 export async function hydratePictographImages(svg: SVGSVGElement) {
-  const sources = new Set<'fluent' | 'noto'>();
-  await Promise.all(Array.from(svg.querySelectorAll<SVGImageElement>('image[data-pictograph-symbol]'), async image => {
+  const images = Array.from(svg.querySelectorAll<SVGImageElement>('image[data-pictograph-symbol]'));
+  if (!images.length) return;
+  await Promise.all(images.map(async image => {
     const name = image.getAttribute('data-pictograph-symbol');
-    if (!isPictographSymbol(name) || name === 'soccer') throw new Error('导出图符无效。');
-    sources.add(libraryFor(name) === 'fluent' ? 'fluent' : 'noto');
+    if (!isPictographSymbol(name)) throw new Error('导出图标无效。');
     image.setAttribute('href', await loadPictographImage(name));
     image.removeAttribute('data-pictograph-symbol');
   }));
 
-  if (!sources.size) return;
-  const credits = await Promise.all([
-    sources.has('fluent') ? import('./assets/fluent-pictographs.json').then(module => module.default.license) : '',
-    sources.has('noto') ? import('./assets/noto-pictographs-license.json').then(({ default: license }) => (
-      [license.source, license.notice, license.changes, license.license].join('\n\n')
-    )) : '',
-  ]);
+  const { default: license } = await import('./assets/noto-pictographs-license.json');
   const metadata = svg.ownerDocument.createElementNS(svg.namespaceURI, 'metadata');
-  metadata.textContent = credits.filter(Boolean).join('\n\n');
+  metadata.textContent = [license.source, license.notice, license.changes, license.license].join('\n\n');
   svg.prepend(metadata);
 }

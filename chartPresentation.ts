@@ -1,11 +1,12 @@
-import { chartSheetHeight, displayedSeries, estimateTextWidth, getPlot, hasChartAxes, HEIGHT } from './chart';
+import { chartSheetHeight, DEFAULT_TICK_LABEL, displayedSeries, estimateTextWidth, getPlot, hasChartAxes, HEIGHT } from './chart';
+import type { getScale } from './chart';
 import type { ChartDocument } from './types';
 
 export const LEGEND_LINE_HEIGHT = 17;
 export const LEGEND_FONT_SIZE = 13;
 export const VALUE_FONT_SIZE = 14;
 
-export function layoutSeriesLegend(chart: ChartDocument, plot = getPlot(chart.style, chart.plotOffset)) {
+export function layoutSeriesLegend(chart: ChartDocument, plot = getPlot(chart)) {
   const { legend, axes: { x: axis } } = chart.style;
   const sheetHeight = chartSheetHeight(chart);
   const series = displayedSeries(chart);
@@ -67,27 +68,50 @@ export function layoutSeriesLegend(chart: ChartDocument, plot = getPlot(chart.st
 }
 
 export function spacedTickLabels(ticks: number[], position: (value: number) => number, showOrigin: boolean,
-  omission?: { from: number; to: number } | null) {
-  const gap = 18 - 1e-6;
-  const reserved = showOrigin ? [position(0)] : [];
+  omission?: { from: number; to: number } | null, fontSize: number = DEFAULT_TICK_LABEL.size) {
+  const gap = fontSize + 5 - 1e-6;
+  const breakGap = fontSize + 3 - 1e-6;
+  const reserved = showOrigin ? [{ y: position(0), boundary: false }] : [];
   const priority = new Set<number>();
   for (const tick of [omission?.from, omission?.to, ticks.at(-1)]) {
     if (tick === undefined || !ticks.includes(tick)) continue;
     const y = position(tick);
-    if (reserved.some(other => Math.abs(y - other) < gap)) continue;
+    const boundary = tick === omission?.from || tick === omission?.to;
+    if (reserved.some(other => Math.abs(y - other.y) < (boundary && other.boundary ? breakGap : gap))) continue;
     priority.add(tick);
-    reserved.push(y);
+    reserved.push({ y, boundary });
   }
 
   const labels = new Set<number>();
   let previous = Infinity;
   for (const tick of ticks) {
     const y = position(tick);
-    if (!priority.has(tick) && (Math.abs(y - previous) < gap || reserved.some(other => Math.abs(y - other) < gap))) continue;
+    if (!priority.has(tick) && (Math.abs(y - previous) < gap || reserved.some(other => Math.abs(y - other.y) < gap))) continue;
     labels.add(tick);
     previous = y;
   }
   return labels;
+}
+
+export function columnIconRows({ bands, tickSpacing, ticks, y }: Pick<ReturnType<typeof getScale>, 'bands' | 'tickSpacing' | 'ticks' | 'y'>) {
+  // Combine very dense intervals. Each row still starts and ends on the scale.
+  const every = tickSpacing > 0 ? Math.max(1, Math.ceil(24 / tickSpacing)) : 1;
+  const rows: { top: number; bottom: number }[] = [];
+  for (const { min, max } of bands) {
+    const parts = min < 0 && max > 0 ? [[min, 0], [0, max]] : [[min, max]];
+    for (const [low, high] of parts) {
+      const negative = high <= 0;
+      const inner = ticks.filter(tick => tick > low && tick < high);
+      if (negative) inner.reverse();
+      const edges = [negative ? high : low, ...inner.filter((_, index) => (index + 1) % every === 0), negative ? low : high];
+      for (let index = 1; index < edges.length; index++) {
+        const first = y(edges[index - 1]);
+        const second = y(edges[index]);
+        if (Math.abs(first - second) > 1e-6) rows.push({ top: Math.min(first, second), bottom: Math.max(first, second) });
+      }
+    }
+  }
+  return rows;
 }
 
 interface ValueLabel {

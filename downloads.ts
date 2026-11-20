@@ -56,7 +56,6 @@ async function serializeChart(svg: SVGSVGElement, bitmap = false) {
   clone.removeAttribute('class');
   if (clone.hasAttribute('tabindex')) clone.removeAttribute('aria-description');
   clone.removeAttribute('tabindex');
-  clone.removeAttribute('data-pan-mode');
   clone.querySelectorAll('[data-canvas-object]').forEach(element => {
     if (element.hasAttribute('data-editable')) element.removeAttribute('aria-label');
     for (const attribute of ['data-canvas-object', 'data-canvas-adjustable', 'data-canvas-adjusting', 'tabindex', 'role', 'aria-description', 'aria-keyshortcuts']) {

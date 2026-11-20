@@ -1,7 +1,7 @@
 import { useId, useLayoutEffect, useRef, useState } from 'react';
 import type { ChangeEvent, ClipboardEvent, FormEvent } from 'react';
 import { ChevronLeft, ChevronRight, ClipboardPaste, Download, Eye, Plus, Scaling, Trash2, Upload, X } from 'lucide-react';
-import { displayedSeriesField, parseValue, removeCategory, SERIES_COLORS, setCategoryLabelVisible, setChartValue } from '../chart';
+import { appendCategory, displayedSeriesField, parseValue, removeCategory, SERIES_COLORS, setCategoryLabelVisible, setChartValue } from '../chart';
 import { chartFileName, download } from '../downloads';
 import { decodeTableFile, exportTable, parseTableBlock, pasteTableBlock, previewTable, replaceTable } from '../tabular';
 import type { TableDelimiter, TableFileEncoding } from '../tabular';
@@ -166,11 +166,7 @@ function DataPanel({ chart, onEdit, activeSeries, onSelectSeries, onReplaceCateg
     const row = categories.length + 1;
     focusRequest.current = { row, column: 0 };
     setPage(pageForRow(row));
-    onEdit(current => ({
-      ...current,
-      categories: [...current.categories, `类别 ${current.categories.length + 1}`],
-      series: current.series.map(item => ({ ...item, values: [...item.values, null] })),
-    }));
+    onEdit(appendCategory);
   }
 
   function addSeries() {

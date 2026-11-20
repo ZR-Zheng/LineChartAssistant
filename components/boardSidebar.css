@@ -33,8 +33,9 @@
 .board-project-menu > summary svg { margin-inline-start: auto; }
 .board-project-menu[open] > summary svg { transform: rotate(180deg); }
 .board-project-actions { display: grid; gap: 2px; }
-.board-project-actions .board-clear { color: #933b32; }
-.board-project-actions .board-clear:hover { background: #fbeeea; }
+.board-heading .board-clear,
+.board-heading .board-clear:not(:disabled):hover { color: #933b32; }
+.board-heading .board-clear:not(:disabled):hover { background: #fbeeea; }
 
 .studio-drawer .board-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .studio-drawer .board-card { width: auto; }

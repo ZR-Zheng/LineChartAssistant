@@ -13,6 +13,10 @@ let chartTools;
 let presentation;
 let ChartDisplay;
 let DataPanel;
+let AxisPanel;
+let AxisSelectionToolbar;
+let iconPickerPosition;
+let iconCatalog;
 let downloads;
 let shortcuts;
 
@@ -21,7 +25,8 @@ before(async () => {
     optimizeDeps: { noDiscovery: true },
     server: { middlewareMode: true, hmr: false, watch: null },
   });
-  [boards, table, storage, assets, chartTools, presentation, { default: ChartDisplay }, { default: DataPanel }, downloads, shortcuts] = await Promise.all([
+  [boards, table, storage, assets, chartTools, presentation, { default: ChartDisplay }, { default: DataPanel },
+    { default: AxisPanel }, { AxisSelectionToolbar }, { iconPickerPosition }, { PICTOGRAPH_SYMBOLS: iconCatalog }, downloads, shortcuts] = await Promise.all([
     server.ssrLoadModule('/boards.ts'),
     server.ssrLoadModule('/tabular.ts'),
     server.ssrLoadModule('/workspaceStorage.ts'),
@@ -30,6 +35,10 @@ before(async () => {
     server.ssrLoadModule('/chartPresentation.ts'),
     server.ssrLoadModule('/components/ChartDisplay.tsx'),
     server.ssrLoadModule('/components/DataPanel.tsx'),
+    server.ssrLoadModule('/components/AxisPanel.tsx'),
+    server.ssrLoadModule('/components/SelectionToolbar.tsx'),
+    server.ssrLoadModule('/components/PictographSymbolField.tsx'),
+    server.ssrLoadModule('/pictographSymbols.ts'),
     server.ssrLoadModule('/downloads.ts'),
     server.ssrLoadModule('/workspaceShortcuts.ts'),
   ]);
@@ -82,6 +91,145 @@ test('dense vertical tick labels are spaced while their tick marks are retained'
   const splitScale = chartTools.getScale(chart.series, null, chartTools.getPlot(chart.style), { ...y, omitted });
   const splitLabels = presentation.spacedTickLabels(splitScale.ticks, splitScale.y, true, splitScale.omission);
   assert.ok(splitLabels.has(omitted.from) && splitLabels.has(omitted.to));
+});
+
+test('axis toolbars expose both label fonts and sizes while geometry stays in axis settings', () => {
+  const workspace = boards.initialWorkspace();
+  const chart = activeChart(workspace);
+  const x = { ...chart.style.axes.x, tickLabelFont: 'kai', tickLabelSize: 24 };
+  const y = { ...chart.style.axes.y, tickPosition: 'outside', tickLabelFont: 'mono', tickLabelSize: 27 };
+  chart.style = { ...chart.style, axes: { x, y } };
+  const restored = activeChart(storage.parseWorkspace(storage.serializeWorkspace(workspace)));
+  assert.deepEqual(restored.style.axes.x, x);
+  assert.deepEqual(restored.style.axes.y, y);
+
+  const panel = renderToStaticMarkup(createElement(AxisPanel, { chart: restored, axis: 'y' }));
+  assert.match(panel, /轴线样式/);
+  assert.match(panel, /轴线长度/);
+  assert.doesNotMatch(panel, /标值字体|标值字号/);
+  const verticalToolbar = renderToStaticMarkup(createElement(AxisSelectionToolbar, { chart: restored, axis: 'y' }));
+  assert.match(verticalToolbar, /标值字体<select/);
+  assert.match(verticalToolbar, /<option value="mono" selected="">等宽<\/option>/);
+  assert.match(verticalToolbar, /标值字号<input[^>]+value="27"/);
+  const horizontalToolbar = renderToStaticMarkup(createElement(AxisSelectionToolbar, { chart: restored, axis: 'x' }));
+  assert.match(horizontalToolbar, /标签字体<select/);
+  assert.match(horizontalToolbar, /<option value="kai" selected="">楷体<\/option>/);
+  assert.match(horizontalToolbar, /标签字号<input[^>]+value="24"/);
+  assert.doesNotMatch(horizontalToolbar + verticalToolbar, /轴线样式|轴线长度|箭头样式/);
+  assert.match(horizontalToolbar, /刻度位置/);
+  assert.match(horizontalToolbar, /网格线/);
+
+  const svg = renderToStaticMarkup(createElement(ChartDisplay, { document: restored }));
+  const labels = [...svg.matchAll(/<text [^>]*data-(?:tick-label="y"|origin="")[^>]*>/g)].map(match => match[0]);
+  assert.ok(labels.length > 1);
+  assert.ok(labels.every(label => label.includes('font-size="27"') && label.includes('Consolas')));
+  const scale = chartTools.getScale(restored.series, null, chartTools.getPlot(restored), y);
+  const positions = [0, ...presentation.spacedTickLabels(scale.ticks, scale.y, true, null, 27)].map(scale.y).sort((a, b) => a - b);
+  assert.ok(positions.slice(1).every((position, index) => position - positions[index] >= 32 - 1e-6));
+  assert.match(svg, /<text [^>]*font-size="24"[^>]*font-family="[^"]*KaiTi[^"]*"[^>]*>周一<\/text>/);
+  const individual = { ...restored, textStyles: { 0: { size: 18, font: 'serif' } } };
+  const individualSvg = renderToStaticMarkup(createElement(ChartDisplay, { document: individual }));
+  assert.match(individualSvg, /<text [^>]*font-size="18"[^>]*font-family="[^"]*SimSun[^"]*"[^>]*>周一<\/text>/);
+});
+
+test('new axes use inward tick marks and 15-unit labels', () => {
+  const chart = activeChart(boards.initialWorkspace());
+  assert.equal(chart.style.axes.x.tickPosition, 'inside');
+  assert.equal(chart.style.axes.y.tickPosition, 'inside');
+  const svg = renderToStaticMarkup(createElement(ChartDisplay, { document: chart }));
+  assert.match(svg, /<text [^>]*font-size="15"[^>]*>周一<\/text>/);
+  assert.match(svg, /<text [^>]*font-size="15"[^>]*data-tick-label="y"/);
+  for (const target of ['xLabel', 'yLabel']) {
+    const title = chartTools.getTextStyle(chart, target);
+    assert.equal(title.size, 15);
+    assert.equal(title.bold, true);
+  }
+  const custom = { ...chart, textStyles: { yLabel: { size: 20, bold: false } } };
+  assert.equal(chartTools.getTextStyle(custom, 'yLabel').size, 20);
+  assert.equal(chartTools.getTextStyle(custom, 'yLabel').bold, false);
+  const yTick = svg.match(/<line x1="([^"]+)" x2="([^"]+)"[^>]+data-axis-tick="y"/);
+  const xTick = svg.match(/<line x1="[^"]+" y1="([^"]+)" x2="[^"]+" y2="([^"]+)"[^>]+data-axis-tick="x"/);
+  assert.ok(Number(yTick[1]) > Number(yTick[2]));
+  assert.ok(Number(xTick[1]) < Number(xTick[2]));
+
+  const negativeChart = { ...chart, series: chart.series.map(series => ({ ...series, values: series.values.map(value => -value) })) };
+  const negativeSvg = renderToStaticMarkup(createElement(ChartDisplay, { document: negativeChart }));
+  const negativeTick = negativeSvg.match(/<line x1="[^"]+" y1="([^"]+)" x2="[^"]+" y2="([^"]+)"[^>]+data-axis-tick="x"/);
+  assert.ok(Number(negativeTick[1]) > Number(negativeTick[2]));
+});
+
+test('point placement can use the nearest tick without crossing a broken axis', () => {
+  const chart = activeChart(boards.initialWorkspace());
+  const axis = { ...chart.style.axes.y, tickMode: 'interval', interval: 5, maximum: 30 };
+  const plot = chartTools.getPlot(chart);
+  const scale = chartTools.getScale(chart.series, null, plot, axis);
+  assert.equal(scale.valueAt(scale.y(17)), 17);
+  assert.equal(scale.valueAt(scale.y(17), true), 15);
+  assert.equal(scale.valueAt(scale.y(1), true), 0);
+  const split = chartTools.getScale(chart.series, null, plot, { ...axis, omitted: { from: 12, to: 22 } });
+  assert.equal(split.valueAt(split.y(11.5), true), 12);
+  assert.equal(split.valueAt(split.y(23), true), 22);
+  assert.equal(split.valueAt(split.omission.top + 2, true), 22);
+});
+
+test('adding a category creates an empty point position in every series', () => {
+  const chart = chartTools.blankChart('bar', true);
+  const result = chartTools.appendCategory(chart);
+  assert.equal(result.categories.length, chart.categories.length + 1);
+  assert.equal(result.categories.at(-1), '类别 7');
+  for (const [i, series] of result.series.entries()) {
+    assert.deepEqual(series.values, [...chart.series[i].values, null]);
+  }
+  const withPoint = chartTools.setChartValue(result, 1, result.categories.length - 1, 5);
+  assert.equal(withPoint.series[0].values.at(-1), null);
+  assert.equal(withPoint.series[1].values.at(-1), 5);
+});
+
+test('column icons share tick centers and respect partial intervals and axis breaks', () => {
+  const base = chartTools.blankChart('bar');
+  const y = { ...base.style.axes.y, tickMode: 'interval', interval: 5 };
+  const series = { ...base.series[0], values: [10, 7, -10], style: { columnIcon: { symbol: 'apple', colorMode: 'single' } } };
+  const chart = {
+    ...base, categories: ['A', 'B', 'C'], series: [series],
+    style: { ...base.style, axes: { ...base.style.axes, y } },
+  };
+  const scale = chartTools.getScale(chart.series, null, chartTools.getPlot(chart), y);
+  const svg = renderToStaticMarkup(createElement(ChartDisplay, { document: chart }));
+  const centers = [...svg.matchAll(/<g data-column-icons=""[^>]*>(.*?)<\/g>/g)].map(([, group]) =>
+    [...group.matchAll(/<use [^>]*y="([^"]+)"[^>]*height="([^"]+)"/g)].map(([, top, size]) => Number(top) + Number(size) / 2));
+  const expected = [[2.5, 7.5], [2.5, 6], [-2.5, -7.5]].map(values => values.map(scale.y));
+  assert.deepEqual(centers.map(values => values.length), [2, 2, 2]);
+  for (const [index, column] of centers.entries()) {
+    assert.ok(column.every((center, row) => Math.abs(center - expected[index][row]) < 1e-6));
+  }
+
+  const split = chartTools.getScale([{ ...series, values: [20, 5, -10] }], null, chartTools.getPlot(chart),
+    { ...y, omitted: { from: 5, to: 15 } });
+  assert.ok(presentation.columnIconRows(split).every(row =>
+    row.bottom <= split.omission.top + 1e-6 || row.top >= split.omission.bottom - 1e-6));
+  const dense = chartTools.getScale(chart.series, null, chartTools.getPlot(chart), { ...y, interval: 0.1 });
+  assert.ok(presentation.columnIconRows(dense).length < 20);
+});
+
+test('the coordinate system can move near the foot of the sheet while allowing space for labels', () => {
+  const base = activeChart(boards.initialWorkspace());
+  const moveToBottom = chart => chartTools.movePlot(chart, { x: chart.plotOffset.x, y: 1000 });
+  const defaultPlot = chartTools.getPlot(moveToBottom(base));
+  assert.ok(defaultPlot.bottom >= 510);
+  assert.equal(defaultPlot.bottom - defaultPlot.top, base.style.axes.y.length);
+
+  const titleBelow = { ...base, style: { ...base.style, axes: { ...base.style.axes,
+    x: { ...base.style.axes.x, titlePlacement: 'center' } } } };
+  const centeredPlot = chartTools.getPlot(moveToBottom(titleBelow));
+  assert.ok(centeredPlot.bottom < defaultPlot.bottom && centeredPlot.bottom > 470);
+  assert.ok(chartTools.axisTitleLayout('x', centeredPlot, titleBelow).point.y < chartTools.HEIGHT - 12);
+
+  const dense = { ...base, categories: Array(45).fill('较长的横轴类别名称'),
+    style: { ...base.style, axes: { ...base.style.axes, x: { ...base.style.axes.x, tickMode: 'all' } } } };
+  const layout = chartTools.categoryTickLayout(dense);
+  assert.equal(layout.angled, true);
+  assert.ok(chartTools.getPlot(moveToBottom(dense)).bottom + layout.labelOffset
+    + layout.width * Math.sin(Math.PI / 3) < chartTools.HEIGHT - 12);
 });
 
 test('coincident values leave room for readable labels and keep isolated line markers', () => {
@@ -398,8 +546,8 @@ test('chart shortcut scopes distinguish editing focus from sidebar controls and 
   assert.equal(shortcuts.workspaceShortcutScope(target('.toolbar-strip', '[popover]')), 'blocked');
 });
 
-test('a fresh SVG export embeds all referenced icon libraries and adds their credits', async () => {
-  const names = ['apple', 'badminton', 'keyboard', 'peach', 'panda'];
+test('a fresh SVG export embeds Noto Emoji icons and adds their license', async () => {
+  const names = ['apple', 'soccer', 'badminton', 'keyboard', 'peach', 'panda', 'hospital', 'grin', 'train'];
   const images = names.map(name => {
     const attributes = new Map([['data-pictograph-symbol', name]]);
     return {
@@ -423,6 +571,20 @@ test('a fresh SVG export embeds all referenced icon libraries and adds their cre
   }
   const [credits] = children;
   assert.equal(credits.tag, 'metadata');
-  assert.match(credits.textContent, /MIT License/);
+  assert.match(credits.textContent, /googlefonts\/noto-emoji/);
   assert.match(credits.textContent, /Apache License/);
+});
+
+test('each selectable Noto Emoji graphic has an offline asset', async () => {
+  const names = Object.keys(iconCatalog);
+  assert.ok(names.length >= 300);
+  const images = await Promise.all(names.map(name => assets.loadPictographImage(name)));
+  assert.ok(images.every(image => decodeURIComponent(image).startsWith('data:image/svg+xml,<svg')));
+});
+
+test('icon picker uses the available space below before considering an upward placement', () => {
+  const position = iconPickerPosition({ left: 635, top: 270, bottom: 310 }, 760, 575);
+  assert.deepEqual(position, { top: 316, left: 398, width: 354, height: 251 });
+  const bottom = iconPickerPosition({ left: 20, top: 525, bottom: 565 }, 320, 600);
+  assert.deepEqual(bottom, { top: 119, left: 8, width: 304, height: 400 });
 });

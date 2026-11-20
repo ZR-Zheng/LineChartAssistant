@@ -13,10 +13,10 @@
 .datum-toolbar label, .datum-toolbar .color-field, .datum-toolbar .pictograph-symbol-field { gap: 5px; }
 .datum-toolbar input[type="text"] { width: 60px; }
 .datum-toolbar input.toolbar-name-input { width: 82px; }
+.axis-selection-toolbar .object-toolbar-field input { width: 66px; }
 .object-toolbar-field { display: flex; flex: none; align-items: center; gap: 5px; }
 .drawing-toolbar .object-toolbar-field input[aria-invalid="true"] { border-color: #b64942; background: #fff7f6; }
 .object-toolbar-error { color: #9b3733; font-size: 12px; white-space: nowrap; }
-.datum-toolbar .pictograph-symbol-field > span { color: var(--muted); font-size: 13px; }
 .datum-toolbar-group > .button.compact, .datum-toolbar .pictograph-symbol-trigger { gap: 5px; padding-inline: 7px; }
 
 .datum-toolbar-delete { margin-inline-start: auto; }

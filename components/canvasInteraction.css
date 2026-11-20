@@ -5,4 +5,3 @@
 }
 
 .chart-sheet [data-canvas-adjusting] { outline: 2px dashed #3455c5; }
-.chart-sheet[data-pan-mode] { cursor: grab; }
