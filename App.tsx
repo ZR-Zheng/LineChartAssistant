@@ -71,6 +71,15 @@ function initialPanel(firstVisit: boolean, compact: boolean): EditorPanel | null
   return firstVisit ? 'data' : null;
 }
 
+function axisForSelection(selection: Selection | null): Axis | null {
+  if (selection?.kind === 'axis') return selection.axis === 'both' ? null : selection.axis;
+  if (selection?.kind === 'text') {
+    if (selection.target === 'xLabel') return 'x';
+    if (selection.target === 'yLabel') return 'y';
+  }
+  return null;
+}
+
 function App() {
   const [startup] = useState(loadWorkspace);
   const [workspace, dispatch] = useReducer(boardReducer, startup.workspace);
@@ -149,13 +158,14 @@ function App() {
   const openPanel = panel === 'data' || panel === settingsPanel ? panel : null;
   const boardListVisible = compact ? boardDrawerOpen : boardSidebarOpen;
   const availablePanelWidth = workspaceWidth === null ? PANEL_WIDTH.max : Math.floor(workspaceWidth - MIN_CANVAS_WIDTH);
-  const narrowPanelLayout = compact || availablePanelWidth < PANEL_WIDTH.min;
+  const narrowPanelLayout = availablePanelWidth < PANEL_WIDTH.min || (compact && openPanel !== 'axes');
   const maxPanelWidth = clamp(availablePanelWidth, PANEL_WIDTH.min, PANEL_WIDTH.max);
   const effectivePanelWidth = Math.min(panelWidth, maxPanelWidth);
   const dataView = narrowPanelLayout && openPanel === 'data';
-  const inlinePanel = openPanel && (!narrowPanelLayout || dataView);
+  const stackedAxes = narrowPanelLayout && openPanel === 'axes';
+  const inlinePanel = openPanel && (!narrowPanelLayout || dataView || stackedAxes);
   const drawerContent = compact && boardDrawerOpen ? 'boards'
-    : narrowPanelLayout && openPanel && openPanel !== 'data' ? 'settings' : null;
+    : openPanel && !inlinePanel ? 'settings' : null;
   const ChartIcon = CHART_KIND_ICONS[chart.kind];
   const availableExercises = exerciseTypes(chart.kind, grouped);
   const currentExercise = availableExercises.includes(exercise) ? exercise : 'chart';
@@ -320,6 +330,10 @@ function App() {
   }, [drawerContent]);
 
   useLayoutEffect(() => {
+    if (openPanel === 'axes' && !stackedAxes) document.getElementById('axis-panel')?.scrollTo(0, 0);
+  }, [openPanel, stackedAxes, axisTab]);
+
+  useLayoutEffect(() => {
     if (!panelFocusRequest || !openPanel) return;
     const section = workspaceSection.current;
     const headerBottom = Math.max(0, appHeader.current?.getBoundingClientRect().bottom ?? 0);
@@ -327,8 +341,9 @@ function App() {
     if (openPanel === 'pictograph' && pictographTab === 'legend') {
       pictographLegendInput.current?.focus({ preventScroll: true });
     } else {
-      document.getElementById(openPanel === 'data' ? 'data-panel' : settingsId)
-        ?.querySelector<HTMLElement>('.panel-heading button')?.focus({ preventScroll: true });
+      const editor = document.getElementById(openPanel === 'data' ? 'data-panel' : settingsId);
+      if (stackedAxes) editor?.scrollIntoView({ block: 'start' });
+      editor?.querySelector<HTMLElement>('.panel-heading button')?.focus({ preventScroll: true });
     }
   }, [panelFocusRequest, openPanel]);
 
@@ -358,6 +373,8 @@ function App() {
     setHighlight(null);
     setOccupiedDataPoint(false);
     if (next?.kind === 'data') setSelectedSeries(next.datum.series);
+    const nextAxis = axisForSelection(next);
+    if (nextAxis) setAxisTab(nextAxis);
   }
 
   function editCanvasObject(next: Selection, trigger: SVGElement) {
@@ -657,7 +674,6 @@ function App() {
   }
 
   function selectAxisTab(axis: Axis) {
-    setAxisTab(axis);
     choose({ kind: 'axis', axis });
   }
 
@@ -665,6 +681,17 @@ function App() {
     selectAxisTab(axis);
     openEditorPanel('axes', trigger);
     setTool('select');
+  }
+
+  function toggleChartSettings(trigger: HTMLButtonElement) {
+    if (openPanel === settingsPanel) {
+      closeEditorPanel();
+    } else if (hasAxes) {
+      const selectedAxis = selection?.kind === 'text' && activeText === null ? null : axisForSelection(selection);
+      openAxes(selectedAxis ?? 'x', trigger);
+    } else {
+      openEditorPanel(settingsPanel, trigger);
+    }
   }
 
   function openPictographLegend(trigger?: HTMLElement) {
@@ -1005,7 +1032,7 @@ function App() {
                 {!dataView && <button className="button quiet" aria-pressed={toolbar} title={toolbar ? '收起画布的全局设置' : '展开画布的全局设置'}
                   onClick={() => setToolbar(!toolbar)}><PanelTop size={16} /> 画布设置</button>}
                 <button ref={settingsButton} className="button data-toggle" aria-expanded={openPanel === settingsPanel} aria-controls={openPanel === settingsPanel ? settingsId : undefined}
-                  onClick={() => openPanel === settingsPanel ? closeEditorPanel() : hasAxes ? openAxes(axis === 'y' ? 'y' : 'x') : openEditorPanel(settingsPanel)}>
+                  onClick={event => toggleChartSettings(event.currentTarget)}>
                   <SlidersHorizontal size={16} /> {pie ? '扇形设置' : pictograph ? '象形图设置' : '坐标轴'}
                 </button>
                 <button ref={boardButton} className="button" aria-expanded={boardListVisible} aria-controls={boardListVisible ? 'board-list-panel' : undefined}
@@ -1028,6 +1055,7 @@ function App() {
               </div>}
             </div>
             <div className={`workspace-body${inlinePanel ? ' with-data' : ''}`} data-data-view={dataView || undefined}
+              data-stacked-axes={stackedAxes || undefined}
               style={{ '--panel-width': `${effectivePanelWidth}px` } as CSSProperties}>
               <nav className="tool-rail" ref={toolRail} aria-label="绘图工具" hidden={dataView}>
                 {TOOLS.filter(item => hasAxes || item.id !== 'add-data').map(({ id, label, icon: Icon, key }) => (

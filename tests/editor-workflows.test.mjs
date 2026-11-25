@@ -447,6 +447,73 @@ test('existing values use vertical drag deltas and can be nudged above an axis l
   assert.equal(scale.valueAt(scale.y(12.34)), 12);
 });
 
+test('dragged values stay concise in the chart, data table and export', () => {
+  const base = chartTools.blankChart('line');
+  const chart = chartTools.setChartValue(base, 0, 0, 12.34);
+  const plot = chartTools.getPlot(chart);
+  const scale = chartTools.getScale(chart.series, null, plot, { ...chart.style.axes.y, maximum: 60 });
+  const dragged = scale.drag(12.34, scale.y(13.3471234567) - scale.y(12.34));
+  assert.equal(dragged, 13.35);
+  const changed = chartTools.setChartValue(chart, 0, 0, dragged);
+  assert.match(renderToStaticMarkup(createElement(ChartDisplay, { document: changed })), /data-value-label=""[^>]*>13\.35<\/text>/);
+  assert.match(renderToStaticMarkup(createElement(DataPanel, { chart: changed, activeSeries: 0 })), /value="13\.35"/);
+  assert.match(table.exportTable(changed), /,13\.35\r?\n/);
+  assert.equal(scale.drag(12.3449, scale.y(12.34495) - scale.y(12.3449)), 12.3449);
+});
+
+test('drag precision preserves small values and exact axis boundaries', () => {
+  const chart = chartTools.blankChart('bar');
+  const plot = chartTools.getPlot(chart);
+  const axis = chart.style.axes.y;
+  const small = chartTools.getScale(chart.series, null, plot, { ...axis, maximum: 0.0006 });
+  assert.equal(small.drag(0.00012, small.y(0.00014623) - small.y(0.00012)), 0.000146);
+
+  const omitted = { from: 12.1278, to: 22.3421 };
+  const maximum = 30.5678;
+  const split = chartTools.getScale(chart.series, null, plot, { ...axis, maximum, omitted });
+  assert.equal(split.drag(10, split.y(12.1277) - split.y(10)), omitted.from);
+  assert.equal(split.drag(25, split.y(22.3422) - split.y(25)), omitted.to);
+  assert.equal(split.drag(25, split.y(maximum) - split.y(25)), maximum);
+});
+
+test('data label precision adapts to magnitude and only uses extra digits near other readings', () => {
+  const labels = presentation.formatValueLabels([
+    0, -42, 12345, 0.001234567, 1.234567e-7, 123456789, Number.MIN_VALUE, 13.3471234567, 13.3471234567,
+    12.341210003, 12.341219999,
+  ]);
+  assert.equal(labels.get(0), '0');
+  assert.equal(labels.get(-42), '-42');
+  assert.equal(labels.get(12345), '12,345');
+  assert.equal(labels.get(0.001234567), '≈0.001235');
+  assert.equal(labels.get(1.234567e-7), '≈1.235E-7');
+  assert.equal(labels.get(123456789), '≈1.235E8');
+  assert.equal(labels.get(Number.MIN_VALUE), '5E-324');
+  assert.equal(labels.get(13.3471234567), '≈13.35');
+  assert.equal(labels.get(12.341210003), '≈12.34121');
+  assert.equal(labels.get(12.341219999), '≈12.34122');
+
+  const exact = presentation.formatValueLabels([1, 1 + Number.EPSILON]);
+  assert.deepEqual([...exact.values()], ['1', '1.0000000000000002']);
+});
+
+test('line and bar graphics show adaptive labels while point descriptions and tables show the original values', () => {
+  const values = [13.3471234567, 12.341210003, 12.341219999, 123.456789, null, null];
+  for (const kind of ['line', 'bar']) {
+    const base = chartTools.blankChart(kind);
+    const chart = { ...base, series: [{ ...base.series[0], values }], style: { ...base.style,
+      axes: { ...base.style.axes, y: { ...base.style.axes.y, maximum: 60 } } } };
+    const svg = renderToStaticMarkup(createElement(ChartDisplay, { document: chart, tool: 'select' }));
+    assert.match(svg, /data-value-label=""[^>]*>≈13\.35<\/text>/);
+    assert.match(svg, /data-value-label=""[^>]*>≈12\.34121<\/text>/);
+    assert.match(svg, /data-value-label=""[^>]*>≈12\.34122<\/text>/);
+    assert.match(svg, /aria-label="A，数据 1，13\.3471234567"/);
+    assert.match(svg, /<title>A，数据 1，13\.3471234567<\/title>/);
+    if (kind === 'bar') assert.match(svg, /data-clipped-value="123\.456789"[^>]*>.*>≈123\.46<\/text>/);
+    assert.match(renderToStaticMarkup(createElement(DataPanel, { chart, activeSeries: 0 })), /value="13\.3471234567"/);
+    assert.match(table.exportTable(chart), /,13\.3471234567\r?\n/);
+  }
+});
+
 test('SVG markup includes clipped values and export explanations for the affected charts', () => {
   const chart = chartTools.blankChart('bar');
   const clipped = { ...chart, series: [{ ...chart.series[0], values: [100, 15, null, null, null, null] }],

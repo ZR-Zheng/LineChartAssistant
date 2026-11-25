@@ -5,7 +5,8 @@ import { AXIS_LENGTHS, axisTitleLayout, categoryTickLayout, categoryX, chartData
   hideText, isLightColor, isNote, markPath, movePlot, removeNote, setChartValue, shorten,
   STATISTIC_LABELS, TEXT_FONTS, textValue, tickOffsets, verticalAxisExtension, visibleMark, WIDTH } from '../chart';
 import type { Plot } from '../chart';
-import { columnIconRows, layoutSeriesLegend, LEGEND_FONT_SIZE, LEGEND_LINE_HEIGHT, placeValueLabels, spacedTickLabels, VALUE_FONT_SIZE } from '../chartPresentation';
+import { columnIconRows, formatValueLabels, layoutSeriesLegend, LEGEND_FONT_SIZE, LEGEND_LINE_HEIGHT, placeValueLabels,
+  spacedTickLabels, VALUE_FONT_SIZE } from '../chartPresentation';
 import { arrowOffset, NO_TARGETS, snapEndpoint, snapPoint, translateLine } from '../alignment';
 import type { Guides, SnapTargets } from '../alignment';
 import { movePie, pieLayout, pieMoveBounds, resetPieLegend } from '../pieLayout';
@@ -754,6 +755,11 @@ function ChartDisplay({
   const valueEvery = Math.max(1, Math.ceil(30 / spacing));
   const zero = scale.y(0);
   const { style } = chart;
+  const valueLabelTexts = useMemo(() => formatValueLabels(hasAxes ? visibleSeries.flatMap(series => {
+    const { showLabels } = getSeriesStyle(series, style);
+    return series.values.filter((value, index): value is number => value !== null && !scale.inBreak(value)
+      && (value > scale.limit ? columns : showLabels && index % valueEvery === 0));
+  }) : []), [hasAxes, visibleSeries, style, scale, columns, valueEvery]);
   const { x: xAxis, y: yAxis } = style.axes;
   const axisArrowhead = style.axisArrowhead ?? DEFAULT_AXIS_ARROWHEAD;
   const { omission } = scale;
@@ -982,7 +988,7 @@ function ChartDisplay({
         const labelInside = negativeBar && y + 20 >= plot.bottom && y - zero >= 24 && barWidth >= 30;
         const labelGap = chart.kind === 'line' ? Math.max(13, seriesStyle.dotSize + 7) : 13;
         const labelY = labelInside ? y - 7 : labelBelow ? y + 17 : y - labelGap;
-        const valueText = formatValue(value);
+        const valueText = valueLabelTexts.get(value) ?? String(value);
         if (clipped) clippedLabels.push({ x, y: labelY, text: valueText });
         else if (seriesStyle.showLabels && index % valueEvery === 0) {
           valueLabels.push({
@@ -993,6 +999,7 @@ function ChartDisplay({
           });
         }
         const editable = tool === 'select';
+        const description = editable ? `${chart.categories[index]}，${series.name}，${value}` : undefined;
         const activeDatum = editable || eraseData;
         const isSelected = selection?.kind === 'data' && selection.datum.series === seriesIndex && selection.datum.index === index;
         const isHighlighted = flashing && (highlight.index === index || highlight.index === undefined);
@@ -1000,10 +1007,10 @@ function ChartDisplay({
           <g key={index} data-datum="" data-series={seriesIndex} data-index={index}
             className={activeDatum ? 'chart-datum' : undefined}
             role={editable ? 'button' : undefined} {...(editable ? canvasObject(`datum:${seriesIndex}:${index}`) : {})}
-            aria-label={editable ? `${chart.categories[index]}，${series.name}，${valueText}` : undefined}
+            aria-label={description}
             onFocus={editable ? () => onSelect({ kind: 'data', datum: { series: seriesIndex, index } }) : undefined}
             onKeyDown={editable ? event => handleDatumKey(event, seriesIndex, index, value) : undefined}>
-            {editable && <title>{`${chart.categories[index]}，${series.name}，${valueText}`}</title>}
+            {description && <title>{description}</title>}
             {columns ? (
               <>
                 {columnBands.map(({ top, bottom }) => {

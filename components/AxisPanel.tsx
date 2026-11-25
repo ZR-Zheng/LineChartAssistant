@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { RotateCcw, X } from 'lucide-react';
 import { AXIS_LENGTHS, AXIS_TITLE_PLACEMENTS, DEFAULT_STYLE, isAxisBreak, parseValue } from '../chart';
@@ -19,6 +19,8 @@ function AxisPanel({ chart, onEdit, onClose, axis, onSelectAxis }: Props) {
   const style = chart.style.axes[axis];
   const label = axis === 'x' ? 'xLabel' : 'yLabel';
   const axisName = axis === 'x' ? '横轴' : '纵轴';
+
+  useEffect(() => setError(''), [axis]);
 
   function update<Key extends keyof AxisStyle>(key: Key, value: AxisStyle[Key]) {
     onEdit(current => {

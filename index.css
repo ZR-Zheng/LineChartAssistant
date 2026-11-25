@@ -244,6 +244,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .workspace-body { display: grid; grid-template-columns: 77px minmax(0, 1fr); border-block: 1px solid var(--border); }
 .workspace-body.with-data { grid-template-columns: 77px minmax(0, 1fr) var(--panel-width, 322px); }
 .workspace-body[data-data-view] { grid-template-columns: minmax(0, 1fr); }
+.workspace-body[data-stacked-axes] {
+  grid-template-columns: 77px minmax(0, 1fr);
+  --panel-inset: var(--canvas-inset);
+}
 .workspace-panel, .tool-rail { position: sticky; top: var(--workspace-inset); z-index: 3; align-self: start; }
 .workspace-panel { min-width: 0; }
 .workspace-panel > .data-panel {
@@ -253,11 +257,15 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   scroll-padding-block-start: 57px;
 }
 .workspace-panel .panel-heading { position: sticky; top: 0; z-index: 3; }
-.workspace-body[data-data-view] .workspace-panel { position: relative; top: auto; }
-.workspace-body[data-data-view] .data-panel { max-height: none; overflow: visible; border: 0; }
-.workspace-body[data-data-view] .panel-heading { top: var(--workspace-inset); }
-.workspace-body[data-data-view] .panel-content :is(button, input, select, textarea, [tabindex]) {
-  scroll-margin-block-start: calc(var(--workspace-inset) + 57px);
+.workspace-body:is([data-data-view], [data-stacked-axes]) .workspace-panel { position: relative; top: auto; grid-column: 1 / -1; }
+.workspace-body:is([data-data-view], [data-stacked-axes]) .data-panel { max-height: none; overflow: visible; border: 0; }
+.workspace-body[data-stacked-axes] .data-panel {
+  border-top: 1px solid var(--border);
+  scroll-margin-block-start: var(--panel-inset);
+}
+.workspace-body:is([data-data-view], [data-stacked-axes]) .panel-heading { top: var(--panel-inset, var(--workspace-inset)); }
+.workspace-body:is([data-data-view], [data-stacked-axes]) .panel-content :is(button, input, select, textarea, [tabindex]) {
+  scroll-margin-block-start: calc(var(--panel-inset, var(--workspace-inset)) + 57px);
 }
 .panel-resize {
   position: absolute;
@@ -597,7 +605,7 @@ body:has(.studio-drawer[open]) { overflow: hidden; }
   .toolbar-end .button { gap: 4px; min-height: 34px; padding: 0 4px; }
   .toolbar-end .button svg { width: 14px; }
   .toolbar-end .data-toggle { margin-left: 0; }
-  .workspace-body, .workspace-body.with-data { grid-template-columns: minmax(0, 1fr); }
+  .workspace-body, .workspace-body.with-data, .workspace-body[data-stacked-axes] { grid-template-columns: minmax(0, 1fr); }
   .tool-rail { flex-direction: row; flex-wrap: wrap; gap: 4px; padding: 6px 8px; border-right: 0; border-bottom: 1px solid var(--border); }
   .tool-button { min-height: 52px; width: 49px; gap: 4px; }
   .tool-button svg { width: 19px; }
@@ -622,7 +630,7 @@ body:has(.studio-drawer[open]) { overflow: hidden; }
 @media (max-height: 480px) {
   .app-shell { --header-inset: 0px; --workspace-inset: 0px; --canvas-inset: 0px; }
   .app-header, .workspace-tools, .tool-rail, .studio-layout > .board-sidebar,
-  .workspace-body[data-data-view] .panel-heading { position: static; }
+  .workspace-body:is([data-data-view], [data-stacked-axes]) .panel-heading { position: static; }
   .tool-rail, .studio-layout > .board-sidebar { max-height: none; overflow: visible; }
   .workspace-panel { position: relative; }
   .workspace-panel > .data-panel { max-height: max(340px, 71dvh); }

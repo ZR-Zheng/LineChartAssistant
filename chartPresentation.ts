@@ -121,6 +121,41 @@ interface ValueLabel {
   offset?: number;
 }
 
+const valueLabelFormats = {
+  standard: new Map<number, Intl.NumberFormat>(),
+  scientific: new Map<number, Intl.NumberFormat>(),
+};
+
+function formatValueLabel(value: number, gap: number) {
+  const magnitude = Math.abs(value);
+  const notation = magnitude >= 1e8 || (magnitude > 0 && magnitude < 1e-4) ? 'scientific' : 'standard';
+  const formats = valueLabelFormats[notation];
+  const initialDigits = notation === 'scientific' ? 3 : magnitude > 0 && magnitude < 1
+    ? 3 - Math.floor(Math.log10(magnitude)) : 2;
+
+  for (let digits = initialDigits; digits <= 20; digits++) {
+    let formatter = formats.get(digits);
+    if (!formatter) {
+      formatter = new Intl.NumberFormat('zh-CN', { notation, maximumFractionDigits: digits });
+      formats.set(digits, formatter);
+    }
+    const text = formatter.format(value);
+    const displayed = Number(text.replaceAll(',', ''));
+    if (displayed === value) return text;
+    // Keep each rounded reading within half the gap so distinct values stay ordered.
+    if (Math.abs(displayed - value) * 2 < gap) return `≈${text}`;
+  }
+  return String(value);
+}
+
+export function formatValueLabels(values: number[]) {
+  const ordered = [...new Set(values)].sort((a, b) => a - b);
+  return new Map(ordered.map((value, index) => {
+    const gap = Math.min(value - (ordered[index - 1] ?? -Infinity), (ordered[index + 1] ?? Infinity) - value);
+    return [value, formatValueLabel(value, gap)];
+  }));
+}
+
 function labelBox({ x, y, text }: ValueLabel) {
   const halfWidth = estimateTextWidth(text, VALUE_FONT_SIZE) / 2 + 3;
   return { left: x - halfWidth, right: x + halfWidth, top: y - 14, bottom: y + 5 };

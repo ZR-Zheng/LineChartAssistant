@@ -528,6 +528,8 @@ export function getScale(
   const lower = Math.min(low, Math.max(bottomTick * step, -bound));
   const upper = axis.maximum === undefined ? Math.max(high, Math.min(topTick * step, bound)) : high;
   const increment = step * unit >= 1 ? Math.max(1, step * unit / 5) : step * unit / 5;
+  // Keep at most two decimal places at ordinary scales, with finer steps on small axes.
+  const dragStep = Math.max(Number.MIN_VALUE, 10 ** Math.min(-2, Math.floor(Math.log10(increment)) - 1));
   const fromNormalized = (normalized: number) => Math.abs(normalized) >= bound
     ? Math.sign(normalized) * Number.MAX_VALUE : round(normalized * unit);
   const lowerValue = Math.min(min, fromNormalized(lower));
@@ -624,9 +626,15 @@ export function getScale(
       const visible = Math.min(value, limit);
       const anchored = yForValue(visible);
       const { value: before } = valueForPosition(anchored);
-      const { value: after, boundary } = valueForPosition(anchored + deltaY);
+      const { band, value: after, boundary } = valueForPosition(anchored + deltaY);
       if (before === after) return value;
-      return boundary && visible === value ? after : offsetValue(value, after - before);
+      if (boundary && visible === value) return after;
+      const change = after - before;
+      const next = offsetValue(value, change);
+      const steps = next / dragStep;
+      const rounded = Math.abs(steps) < Number.MAX_SAFE_INTEGER ? round(Math.round(steps) * dragStep) : next;
+      const candidate = visible === value ? clamp(rounded, band.min, band.max) : rounded;
+      return Math.sign(candidate - value) === -Math.sign(change) ? value : candidate;
     },
     nudge(value: number, direction: number) {
       const next = offsetValue(value, (increment || Number.MIN_VALUE) * direction);
