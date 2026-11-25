@@ -19,6 +19,8 @@ let iconPickerPosition;
 let iconCatalog;
 let downloads;
 let shortcuts;
+let exerciseBank;
+let exercises;
 
 before(async () => {
   server = await createServer({
@@ -26,7 +28,8 @@ before(async () => {
     server: { middlewareMode: true, hmr: false, watch: null },
   });
   [boards, table, storage, assets, chartTools, presentation, { default: ChartDisplay }, { default: DataPanel },
-    { default: AxisPanel }, { AxisSelectionToolbar }, { iconPickerPosition }, { PICTOGRAPH_SYMBOLS: iconCatalog }, downloads, shortcuts] = await Promise.all([
+    { default: AxisPanel }, { AxisSelectionToolbar }, { iconPickerPosition }, { PICTOGRAPH_SYMBOLS: iconCatalog }, downloads, shortcuts,
+    exerciseBank, exercises] = await Promise.all([
     server.ssrLoadModule('/boards.ts'),
     server.ssrLoadModule('/tabular.ts'),
     server.ssrLoadModule('/workspaceStorage.ts'),
@@ -41,6 +44,8 @@ before(async () => {
     server.ssrLoadModule('/pictographSymbols.ts'),
     server.ssrLoadModule('/downloads.ts'),
     server.ssrLoadModule('/workspaceShortcuts.ts'),
+    server.ssrLoadModule('/exerciseBank.ts'),
+    server.ssrLoadModule('/randomChart.ts'),
   ]);
 });
 
@@ -49,6 +54,117 @@ after(async () => { await server?.close(); });
 function activeChart(workspace) {
   return workspace.boards.find(board => board.id === workspace.activeId).chart;
 }
+
+function seededRandom(seed) {
+  return () => {
+    seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+    return seed / 2 ** 32;
+  };
+}
+
+test('new charts draw every horizontal tick while saved interval settings still apply', () => {
+  const workspace = boards.initialWorkspace();
+  const chart = activeChart(workspace);
+  chart.categories = Array.from({ length: 27 }, (_, index) => `第 ${index + 1} 项`);
+  chart.series[0].values = chart.categories.map((_, index) => index + 1);
+  const render = document => renderToStaticMarkup(createElement(ChartDisplay, { document }));
+
+  assert.equal(chartTools.categoryTickLayout(chart).step, 1);
+  const svg = render(chart);
+  assert.equal([...svg.matchAll(/data-axis-tick="x"/g)].length, chart.categories.length);
+  assert.match(svg, />第 27 项<\/text>/);
+  assert.equal(chart.style.axes.y.tickMode, 'auto');
+
+  chart.style = { ...chart.style, axes: { ...chart.style.axes, x: { ...chart.style.axes.x, tickMode: 'interval', interval: 3 } } };
+  const restored = activeChart(storage.parseWorkspace(storage.serializeWorkspace(workspace)));
+  assert.equal(chartTools.categoryTickLayout(restored).step, 3);
+  assert.equal([...render(restored).matchAll(/data-axis-tick="x"/g)].length, 9);
+});
+
+test('random exercises cycle through matching scenarios and question types without adjacent repeats', () => {
+  const generate = exercises.createExerciseGenerator(seededRandom(17));
+  const topics = Object.keys(exercises.EXERCISE_TOPICS).filter(topic => topic !== 'all');
+  const pools = [
+    ['line', false, exerciseBank.AXIS_EXERCISES.line],
+    ['bar', false, exerciseBank.AXIS_EXERCISES.bar],
+    ['bar', true, Object.entries(exerciseBank.GROUPED_EXERCISES).flatMap(([topic, items]) =>
+      items.map(item => ({ topic, ...item })))],
+    ['pie', false, exerciseBank.PIE_EXERCISES],
+    ['pictograph', false, exerciseBank.PICTOGRAPH_EXERCISES],
+  ];
+  for (const [kind, grouped, templates] of pools) {
+    for (const topic of ['all', ...topics]) {
+      const expected = templates.filter(template => topic === 'all' || template.topic === topic).map(template => template.title);
+      assert.ok(expected.length >= 3);
+      const titles = Array.from({ length: expected.length }, () => generate(kind, topic, 'chart', grouped).title);
+      assert.deepEqual(new Set(titles), new Set(expected));
+      const next = generate(kind, topic, 'chart', grouped);
+      assert.notEqual(next.title, titles.at(-1));
+      assert.equal(next.notes.length, 0);
+    }
+  }
+
+  const pieQuestions = Array.from({ length: 4 }, () => generate('pie', 'school', 'random').notes[0].text);
+  const typeOfQuestion = text => text.replace(/“[^”]+”/g, '“类别”');
+  assert.equal(new Set(pieQuestions.slice(0, 3).map(typeOfQuestion)).size, 3);
+  assert.notEqual(typeOfQuestion(pieQuestions[2]), typeOfQuestion(pieQuestions[3]));
+});
+
+test('generated values, questions and pictograph icons stay valid when scenarios are shuffled', () => {
+  const generate = exercises.createExerciseGenerator(seededRandom(87));
+  const pictographs = new Map(exerciseBank.PICTOGRAPH_EXERCISES.map(item => [item.title, item]));
+  let nonAdjacentTrend = false;
+  let shuffledIcons = false;
+  for (const [kind, grouped] of [['line', false], ['bar', false], ['bar', true], ['pie', false], ['pictograph', false]]) {
+    const types = exercises.exerciseTypes(kind, grouped).slice(2);
+    for (const type of types) {
+      for (let i = 0; i < 50; i++) {
+        const chart = generate(kind, 'all', type, grouped);
+        const { categories, series, style, notes } = chart;
+        assert.equal(notes.length, 1);
+        const question = notes[0].text;
+        assert.ok(notes[0].exerciseQuestion && question.length > '问题：'.length);
+        const referenced = [...question.matchAll(/“([^”]+)”/g)].map(([, category]) => categories.indexOf(category));
+        assert.ok(referenced.every(index => index >= 0));
+        assert.equal(series.length, grouped ? 2 : 1);
+        assert.ok(series.every(item => item.values.length === categories.length));
+        const values = series.flatMap(item => item.values);
+        assert.ok(values.every(value => Number.isInteger(value) && value > 0));
+        if (kind === 'pie') {
+          assert.equal(values.reduce((sum, value) => sum + value, 0), 100);
+          assert.equal(style.pie.percentageDigits, 0);
+        } else {
+          assert.equal(style.axes.x.tickMode, 'all');
+          assert.ok(values.every(value => value % style.axes.y.interval === 0 && value < style.axes.y.maximum));
+        }
+        if (type === 'average') {
+          for (const item of series) {
+            const mean = item.values.reduce((sum, value) => sum + value, 0) / item.values.length;
+            assert.equal(mean % style.axes.y.interval, 0);
+          }
+        }
+        if (type === 'extremes' && !grouped) assert.equal(new Set(values).size, values.length);
+        if (type === 'trend') {
+          assert.ok(referenced[0] < referenced[1]);
+          if (referenced[1] - referenced[0] > 1) nonAdjacentTrend = true;
+        }
+        if (type === 'countAtLeast') assert.ok(values.includes(Number(question.match(/至少为 (\d+)/)?.[1])));
+        if (type === 'symbolValue') {
+          assert.ok(values.some(value => value % style.pictograph.unit === style.pictograph.unit / 2));
+        }
+        if (kind === 'pictograph') {
+          const template = pictographs.get(chart.title);
+          if (Array.isArray(template.icon)) {
+            assert.deepEqual(chart.pictographSymbols, categories.map(category => template.icon[template.categories.indexOf(category)]));
+            if (categories.some((category, index) => category !== template.categories[index])) shuffledIcons = true;
+          }
+        }
+      }
+    }
+  }
+  assert.ok(nonAdjacentTrend);
+  assert.ok(shuffledIcons);
+});
 
 test('a dense axis chart keeps every series name and grows the sheet to fit the legend', () => {
   const base = activeChart(boards.initialWorkspace());

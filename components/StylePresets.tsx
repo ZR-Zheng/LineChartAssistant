@@ -80,7 +80,7 @@ function presetAxis(axis: Axis, config: Preset['config']): AxisStyle {
       && { tickLabelSize: Math.round(clamp(saved.tickLabelSize, TEXT_SIZE.min, TEXT_SIZE.max)) }),
     tickLength: bounded(tickLength, 0, 20, fallback.tickLength),
     tickMode: saved?.tickMode === 'auto' || saved?.tickMode === 'all' || saved?.tickMode === 'interval'
-      ? saved.tickMode : validInterval ? 'interval' : 'auto',
+      ? saved.tickMode : validInterval ? 'interval' : fallback.tickMode,
     interval: validInterval ? (axis === 'x' ? Math.round(clamp(interval, 1, Number.MAX_SAFE_INTEGER)) : interval) : fallback.interval,
     ...(validMaximum && { maximum }),
     ...(axis === 'y' && isAxisBreak(saved?.omitted) && (!validMaximum || saved.omitted.to <= maximum) && { omitted: saved.omitted }),

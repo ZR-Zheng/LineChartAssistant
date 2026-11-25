@@ -27,7 +27,7 @@ import { appendCategory, chartDataWarnings, clamp, displayedSeries, displayedSer
   removeCategory, removeSeries, SERIES_COLORS, setChartValue, STATISTIC_LABELS, statistics, visibleMark } from './chart';
 import { download, exportChartImage, exportChartSvg } from './downloads';
 import { NO_TARGETS, translateLine } from './alignment';
-import { exerciseTypes, randomChart } from './randomChart';
+import { createExerciseGenerator, exerciseTypes, randomChart } from './randomChart';
 import type { ExerciseTopic, ExerciseType } from './randomChart';
 import { movePie, resetPieLegend, togglePieLegendAttachment } from './pieLayout';
 import { resetPictographLegend } from './pictograph';
@@ -128,6 +128,7 @@ function App() {
   const [saveConflict, setSaveConflict] = useState(false);
   const [topic, setTopic] = useState<ExerciseTopic>('all');
   const [exercise, setExercise] = useState<ExerciseType>('chart');
+  const [generateExercise] = useState(() => createExerciseGenerator());
   const projectFile = useRef<HTMLInputElement>(null);
   const pictographLegendInput = useRef<HTMLTextAreaElement>(null);
   const svg = useRef<SVGSVGElement>(null);
@@ -479,7 +480,7 @@ function App() {
     if (id === action) return;
     resetBoardControls();
     if (typeof action === 'number') dispatch({ type: 'select', id: action });
-    else if (action === 'random') dispatch({ type: 'add', chart: randomChart(chart.kind, Math.random, topic, currentExercise, grouped) });
+    else if (action === 'random') dispatch({ type: 'add', chart: generateExercise(chart.kind, topic, currentExercise, grouped) });
     else dispatch({ type: action });
   }
 

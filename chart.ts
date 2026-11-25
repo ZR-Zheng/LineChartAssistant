@@ -105,7 +105,7 @@ export const DEFAULT_STYLE: ChartStyle = {
   showOrigin: true,
   dotSize: 5,
   strokeWidth: 3,
-  axes: { x: BASE_AXIS, y: { ...BASE_AXIS, length: DEFAULT_PLOT.bottom - DEFAULT_PLOT.top } },
+  axes: { x: { ...BASE_AXIS, tickMode: 'all' }, y: { ...BASE_AXIS, length: DEFAULT_PLOT.bottom - DEFAULT_PLOT.top } },
   axisArrowhead: DEFAULT_AXIS_ARROWHEAD,
   legend: 'auto',
 };
@@ -207,7 +207,7 @@ export function categoryTickLayout(chart: Pick<PlotLayout, 'style' | 'categories
   const [, outside] = tickOffsets(axis);
   return {
     step, band, angled,
-    width: angled ? 44 : Math.max(8, band - 4),
+    width: angled ? 96 : Math.max(8, band - 4),
     labelOffset: angled ? Math.max(18, outside + 12) : Math.max(28, outside + 18),
   };
 }
