@@ -10,6 +10,7 @@ import ChartDisplay from './components/ChartDisplay';
 import ChartKindPicker, { CHART_KIND_ICONS } from './components/ChartKindPicker';
 import ColumnIconField from './components/ColumnIconField';
 import ColorPicker from './components/ColorPicker';
+import DataLabelStyleControl from './components/DataLabelStyleControl';
 import DataPanel from './components/DataPanel';
 import ExportControls from './components/ExportControls';
 import RandomChartControls from './components/RandomChartControls';
@@ -388,7 +389,7 @@ function App() {
     const trigger = canvasObject.current;
     if (event.key !== 'Escape' || event.defaultPrevented || event.nativeEvent.isComposing
         || (!trigger && !(event.target instanceof HTMLInputElement))) return;
-    if (document.querySelector('.datum-delete-menu:popover-open, .pictograph-symbol-popover:popover-open')) return;
+    if (document.querySelector('.datum-delete-menu:popover-open, .pictograph-symbol-popover:popover-open, .data-label-style-menu:popover-open')) return;
     event.preventDefault();
     canvasObject.current = null;
     if (trigger?.isConnected) trigger.focus();
@@ -700,6 +701,11 @@ function App() {
     openEditorPanel('pictograph', trigger);
   }
 
+  function openPieLabelSettings(trigger: HTMLElement) {
+    setPieTab('labels');
+    openEditorPanel('pie', trigger);
+  }
+
   function addStatistic(stat: Statistic) {
     if (!stats || !scale?.includes(stats[stat])) return;
     const y = scale.y(stats[stat]);
@@ -833,7 +839,7 @@ function App() {
       onChange={changes => setNewTextStyle(previous => ({ ...previous, ...changes }))} />;
     if (activeDatum) return <Fragment key={`${id}:${chart.kind}:${activeDatum.series}:${activeDatum.index}`}>
       <DataSelectionToolbar chart={chart} datum={activeDatum} onEdit={onEdit}
-        onClose={() => choose(null)} onRemoveSeries={deleteSeries} onHighlight={setHighlight} />
+        onClose={() => choose(null)} onRemoveSeries={deleteSeries} onHighlight={setHighlight} onOpenPieLabels={openPieLabelSettings} />
     </Fragment>;
     if (axis) return <Fragment key={axis}>
       <AxisSelectionToolbar chart={chart} axis={axis} onEdit={onEdit} onSettings={openAxes} />
@@ -927,6 +933,9 @@ function App() {
           ...current, style: { ...current.style, showTitle: current.style.showTitle === false },
         }))}><Type size={16} /> {chart.style.showTitle === false ? '显示标题' : '隐藏标题'}</button>
         <button className="button quiet" aria-pressed={showDataLabels} onClick={toggleDataLabels}><Tags size={16} /> {pie ? '扇区标签' : '数据标签'}</button>
+        {pie ? <button className="button quiet" onClick={event => openPieLabelSettings(event.currentTarget)}>
+          <SlidersHorizontal size={15} /> 标签样式</button>
+          : <DataLabelStyleControl chart={chart} onEdit={onEdit} />}
         <button className="button quiet" aria-pressed={showLegend} onClick={toggleLegend}><List size={16} /> {pictograph ? '图标图例' : '图例'}</button>
         {pie && chart.piePosition && <button className="button quiet" onClick={() => onEdit(current => movePie(current))}>
           <RotateCcw size={16} /> 还原扇形位置</button>}

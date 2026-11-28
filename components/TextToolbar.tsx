@@ -1,7 +1,8 @@
-import { Bold, Italic, Trash2, Underline, X } from 'lucide-react';
+import { Trash2, X } from 'lucide-react';
 import { AXIS_TITLE_PLACEMENTS, clamp, isNote, TEXT_FONTS, TEXT_SIZE } from '../chart';
 import type { Axis, TextFont, TextStyle, TextTarget, TitlePlacement } from '../types';
 import ColorPicker from './ColorPicker';
+import TextEmphasisControls from './TextEmphasisControls';
 
 interface Props {
   target: TextTarget;
@@ -44,14 +45,7 @@ function TextToolbar({ target, style, onChange, onClose, onDelete, onDeleteCateg
       <div className="color-field"><span>颜色</span>
         <ColorPicker label="文字颜色" value={style.color} onChange={color => onChange({ color })} />
       </div>
-      <div className="text-format-actions" role="group" aria-label="文字样式">
-        <button className="icon-button text-weight" aria-pressed={style.bold} aria-label="加粗" title="加粗"
-          onClick={() => onChange({ bold: !style.bold })}><Bold size={17} /></button>
-        <button className="icon-button text-weight" aria-pressed={style.italic} aria-label="斜体" title="斜体"
-          onClick={() => onChange({ italic: !style.italic })}><Italic size={17} /></button>
-        <button className="icon-button text-weight" aria-pressed={style.underline} aria-label="下划线" title="下划线"
-          onClick={() => onChange({ underline: !style.underline })}><Underline size={17} /></button>
-      </div>
+      <TextEmphasisControls style={style} onChange={onChange} />
       {isNote(target) && (
         <label>对齐
           <select value={style.alignment} onChange={event => onChange({ alignment: event.target.value as TextStyle['alignment'] })}>

@@ -4,10 +4,11 @@ import { categoryLabelStyles, clamp, DEFAULT_GROUP_WIDTH, DEFAULT_TICK_LABEL, ge
   removeCategory, setChartValue, setTickLabelStyle, shorten, TEXT_FONTS, TEXT_SIZE, TICK_LABEL_TEXT_KEYS } from '../chart';
 import { DEFAULT_PICTOGRAPH_STYLE, pictographSymbolAt } from '../pictograph';
 import type { PictographSymbol } from '../pictographSymbols';
-import type { Axis, AxisStyle, ChartDocument, ChartEdit, DataHighlight, Datum, PictographStyle, SeriesStyle } from '../types';
+import type { Axis, AxisStyle, ChartDocument, ChartEdit, DataHighlight, Datum, PictographStyle, SeriesStyle, TextStyle } from '../types';
 import PictographSymbolField from './PictographSymbolField';
 import ColorPicker from './ColorPicker';
 import ColumnIconField from './ColumnIconField';
+import DataLabelStyleControl from './DataLabelStyleControl';
 import './selectionToolbar.css';
 
 interface Props {
@@ -115,9 +116,10 @@ export function GroupWidthField({ chart, onEdit }: { chart: ChartDocument; onEdi
   </label>;
 }
 
-export function DataSelectionToolbar({ chart, datum, onEdit, onClose, onRemoveSeries, onHighlight }: Props & {
+export function DataSelectionToolbar({ chart, datum, onEdit, onClose, onRemoveSeries, onHighlight, onOpenPieLabels }: Props & {
   datum: Datum; onRemoveSeries: (index: number) => void;
   onHighlight: (highlight: DataHighlight) => void;
+  onOpenPieLabels: (trigger: HTMLElement) => void;
 }) {
   const series = chart.series[datum.series];
   const value = series.values[datum.index];
@@ -202,6 +204,9 @@ export function DataSelectionToolbar({ chart, datum, onEdit, onClose, onRemoveSe
         {!pie && colorField}
         <button className="button compact toolbar-toggle" aria-pressed={appearance.showLabels}
           onClick={() => format({ showLabels: !appearance.showLabels })}><Tags size={15} /> {pie ? '扇区标签' : '数值标签'}</button>
+        {pie ? <button type="button" className="button compact" onClick={event => onOpenPieLabels(event.currentTarget)}>
+          <SlidersHorizontal size={15} /> 标签样式</button>
+          : <DataLabelStyleControl chart={chart} onEdit={onEdit} seriesIndex={datum.series} />}
         {chart.kind === 'line' && <label>线宽
           <select value={appearance.strokeWidth} onChange={event => format({ strokeWidth: Number(event.target.value) })}>
             {numericOptions([1, 2, 3, 4, 5, 6, 8], appearance.strokeWidth).map(width => <option key={width} value={width}>{width}</option>)}
@@ -305,7 +310,7 @@ export function AxisSelectionToolbar({ chart, axis, onEdit, onSettings }: Omit<P
   const mixedFont = hasLabelOverride('tickLabelFont', labelFont);
   const mixedSize = hasLabelOverride('tickLabelSize', style.tickLabelSize ?? DEFAULT_TICK_LABEL.size);
 
-  function hasLabelOverride<Key extends keyof typeof TICK_LABEL_TEXT_KEYS>(key: Key, value: AxisStyle[Key]) {
+  function hasLabelOverride<Key extends keyof typeof TICK_LABEL_TEXT_KEYS>(key: Key, value: TextStyle[(typeof TICK_LABEL_TEXT_KEYS)[Key]]) {
     const textKey = TICK_LABEL_TEXT_KEYS[key];
     return labelStyles.some(([, label]) => label[textKey] !== undefined && label[textKey] !== value);
   }

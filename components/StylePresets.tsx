@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
-import { AXIS_LENGTHS, DEFAULT_AXIS_ARROWHEAD, DEFAULT_STYLE, clamp, isAxisArrowhead, isAxisBreak, isGroupWidth, isPieStyle, TEXT_FONTS, TEXT_SIZE } from '../chart';
+import { AXIS_LENGTHS, DEFAULT_AXIS_ARROWHEAD, DEFAULT_STYLE, clamp, isAxisArrowhead, isAxisBreak, isDataLabelStyle, isGroupWidth, isPieStyle, TEXT_FONTS, TEXT_SIZE } from '../chart';
 import { download } from '../downloads';
 import { isPictographStyle } from '../pictograph';
 import type { Axis, AxisStyle, ChartStyle } from '../types';
@@ -35,6 +35,7 @@ function applyPreset(config: Preset['config']): ChartStyle {
   return {
     grid: setting('grid'),
     showLabels: setting('showLabels'),
+    dataLabel: isDataLabelStyle(config.dataLabel) ? config.dataLabel : undefined,
     dots: setting('dots'),
     showOrigin: setting('showOrigin'),
     showTitle: config.showTitle !== false,

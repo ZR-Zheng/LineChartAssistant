@@ -3,6 +3,7 @@ import { DEFAULT_PIE_STYLE, PIE_PALETTE_NAMES, PIE_PRESETS, pieStyle, TEXT_FONTS
 import type { ChartDocument, ChartEdit, PieStyle, TextFont } from '../types';
 import { movePie, resetPieLegend, togglePieLegendAttachment } from '../pieLayout';
 import ColorPicker from './ColorPicker';
+import TextEmphasisControls from './TextEmphasisControls';
 
 const TABS = { shape: '图形', labels: '标签', legend: '图例' } as const;
 export type PieSettingsTab = keyof typeof TABS;
@@ -107,6 +108,9 @@ export default function PieSettings({ chart, onEdit, onClose, tab, onSelectTab, 
               onChange={value => update({ percentageDigits: Number(value) })} />
           </div>
           <div className="pie-color-setting">
+            <TextEmphasisControls style={{ bold: style.labelBold ?? true, italic: style.labelItalic, underline: style.labelUnderline }}
+              onChange={changes => update({ labelBold: changes.bold ?? style.labelBold,
+                labelItalic: changes.italic ?? style.labelItalic, labelUnderline: changes.underline ?? style.labelUnderline })} />
             <div className="color-field"><span>标签颜色</span>
               <ColorPicker label="扇区标签颜色" value={style.labelColor ?? '#ffffff'} mixed={!style.labelColor} onChange={color => update({ labelColor: color })} />
             </div>

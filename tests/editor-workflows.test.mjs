@@ -653,6 +653,34 @@ test('data label precision adapts to magnitude and only uses extra digits near o
   assert.deepEqual([...exact.values()], ['1', '1.0000000000000002']);
 });
 
+test('data label formatting persists per series and a chart-wide change replaces the matching override', () => {
+  const workspace = boards.initialWorkspace();
+  const chart = activeChart(workspace);
+  const shared = chartTools.setDataLabelStyle(chart, { font: 'fangsong', size: 25, color: '#315897', bold: false, italic: true, underline: true });
+  const individual = chartTools.setDataLabelStyle(shared, { font: 'mono', size: 20, bold: true }, 0);
+  const updated = chartTools.setDataLabelStyle(individual, { font: 'fangsong' });
+  assert.deepEqual(updated.series[0].style.dataLabel, { size: 20, bold: true });
+  workspace.boards.find(board => board.id === workspace.activeId).chart = updated;
+  const restored = activeChart(storage.parseWorkspace(storage.serializeWorkspace(workspace)));
+  assert.deepEqual(restored.style.dataLabel, updated.style.dataLabel);
+  assert.deepEqual(restored.series[0].style.dataLabel, updated.series[0].style.dataLabel);
+
+  const render = document => renderToStaticMarkup(createElement(ChartDisplay, { document }));
+  for (const kind of ['line', 'bar', 'pictograph']) {
+    const svg = render({ ...restored, kind });
+    assert.match(svg, /font-size="20"[^>]*FangSong[^>]*font-weight="700" font-style="italic" text-decoration="underline"[^>]*data-value-label=/);
+    assert.match(svg, /<text[^>]*data-value-label=""[^>]*fill="#315897"|<text[^>]*fill="#315897"[^>]*data-value-label=""/);
+    assert.match(svg, /<text[^>]*>周一<\/text>/);
+  }
+
+  const pie = { ...chart, kind: 'pie', style: { ...chart.style, pie: {
+    labelFont: 'mono', labelFontSize: 19, labelColor: '#315897', labelBold: false, labelItalic: true, labelUnderline: true,
+  } } };
+  workspace.boards.find(board => board.id === workspace.activeId).chart = pie;
+  const pieSvg = render(activeChart(storage.parseWorkspace(storage.serializeWorkspace(workspace))));
+  assert.match(pieSvg, /fill="#315897" font-size="19"[^>]*Consolas[^>]*font-weight="400" font-style="italic" text-decoration="underline"[^>]*data-value-label=/);
+});
+
 test('line and bar graphics show adaptive labels while point descriptions and tables show the original values', () => {
   const values = [13.3471234567, 12.341210003, 12.341219999, 123.456789, null, null];
   for (const kind of ['line', 'bar']) {

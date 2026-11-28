@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { clamp, estimateTextWidth, formatShare, formatValue, HEIGHT, isLightColor, pieColor, TEXT_FONTS, WIDTH } from '../chart';
+import { clamp, dataLabelTextAttributes, estimateTextWidth, formatShare, formatValue, HEIGHT, isLightColor, pieColor, TEXT_FONTS, WIDTH } from '../chart';
 import { arrowOffset } from '../alignment';
 import { movePie, pieLayout, resetPieLegend } from '../pieLayout';
 import type { ChartDocument, ChartEdit, DataHighlight, Datum, Point, Selection } from '../types';
@@ -69,6 +69,7 @@ export default function PieGraphic({ chart, layout, selection, highlight, editab
   if (!slices.length) return null;
 
   const { radius, startAngle, holeRatio, clockwise, labelFontSize, labelMode, legendFontSize, legendMarkerSize } = style;
+  const typography = dataLabelTextAttributes({ font: style.labelFont, bold: style.labelBold, italic: style.labelItalic, underline: style.labelUnderline });
   const inner = radius * holeRatio;
   const rotation = startAngle / 180 * Math.PI;
   const at = (theta: number, distance: number) => {
@@ -107,7 +108,7 @@ export default function PieGraphic({ chart, layout, selection, highlight, editab
           {highlighted && <path d={arc} fill="none" stroke="#506fe7" strokeWidth="5" pointerEvents="none" data-editor-only="" data-value-highlight="" />}
           {showLabels && spot && <text x={spot.x} y={spot.y - (both ? lineHeight / 2 : 0)}
             textAnchor="middle" dominantBaseline="central" pointerEvents="none" fill={style.labelColor ?? (isLightColor(color) ? '#26334c' : '#fff')}
-            fontSize={labelFontSize} fontFamily={TEXT_FONTS[style.labelFont].family} fontWeight="650">
+            fontSize={labelFontSize} {...typography} data-custom-size="" data-value-label="">
             {firstLine}{both && <tspan x={spot.x} dy={lineHeight}>{number}</tspan>}
           </text>}
         </>, percentage);

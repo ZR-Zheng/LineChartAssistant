@@ -1,6 +1,6 @@
 import { initialWorkspace } from './boards';
 import type { Board, Workspace } from './boards';
-import { AXIS_LENGTHS, EXERCISE_POSITION, isAxisArrowhead, isAxisBreak, isGroupWidth, isPieStyle, TEXT_FONTS, TEXT_SIZE } from './chart';
+import { AXIS_LENGTHS, EXERCISE_POSITION, isAxisArrowhead, isAxisBreak, isDataLabelStyle, isGroupWidth, isPieStyle, TEXT_FONTS, TEXT_SIZE } from './chart';
 import { isPictographStyle } from './pictograph';
 import { isPictographSymbol } from './pictographSymbols';
 import type { ChartDocument } from './types';
@@ -86,6 +86,7 @@ function validChart(value: unknown): value is SavedChart {
       && (item.style === undefined || object(item.style)
         && ['strokeWidth', 'dotSize', 'columnWidth'].every(key => item.style[key] === undefined || positive(item.style[key]))
         && ['dots', 'showLabels', 'roundedColumns'].every(key => item.style[key] === undefined || bool(item.style[key]))
+        && (item.style.dataLabel === undefined || isDataLabelStyle(item.style.dataLabel))
         && oneOf(item.style.dotShape, undefined, 'circle', 'square', 'diamond')
         && oneOf(item.style.dotFill, undefined, 'hollow', 'solid')
         && (item.style.columnIcon === undefined || object(item.style.columnIcon)
@@ -98,6 +99,7 @@ function validChart(value: unknown): value is SavedChart {
     && (pieLegendOffset === undefined || point(pieLegendOffset))
     && (pictographLegendPosition === undefined || point(pictographLegendPosition))
     && object(style) && bool(style.grid) && bool(style.dots) && bool(style.showLabels) && bool(style.showOrigin)
+    && (style.dataLabel === undefined || isDataLabelStyle(style.dataLabel))
     && oneOf(style.legend, true, false, 'auto') && (style.showTitle === undefined || bool(style.showTitle))
     && (style.axisArrowhead === undefined || isAxisArrowhead(style.axisArrowhead))
     && (style.groupWidth === undefined || isGroupWidth(style.groupWidth)) && (style.pie === undefined || isPieStyle(style.pie))

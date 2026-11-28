@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { arrowOffset } from '../alignment';
-import { clamp, formatValue, getSeriesStyle, TEXT_FONTS } from '../chart';
+import { clamp, dataLabelStyle, dataLabelTextAttributes, estimateTextWidth, formatValue, getSeriesStyle, TEXT_FONTS } from '../chart';
 import { pictographLayout, pictographSymbolAt, resizePictographTable, setPictographCategoryShare } from '../pictograph';
 import type { ChartDocument, ChartEdit, DataHighlight, Datum, PictographStyle, Selection } from '../types';
 import PictographIcon from './PictographIcon';
@@ -36,6 +36,8 @@ export default function PictographGraphic({ chart, selection, highlight, editabl
   const colored = style.colorMode === 'color';
   const symbols = chart.categories.map((_, index) => pictographSymbolAt(chart, index));
   const showValues = getSeriesStyle(series, chart.style).showLabels;
+  const numberStyle = dataLabelStyle(chart.style, series);
+  const typography = dataLabelTextAttributes(numberStyle, 400);
   const { top, bottom, left, right, symbolLeft } = plot;
   const thickness = (vertical ? right - left : bottom - top) / chart.categories.length;
   const distance = vertical ? bottom - top : right - symbolLeft - 79;
@@ -43,6 +45,9 @@ export default function PictographGraphic({ chart, selection, highlight, editabl
   const size = Math.min(style.symbolSize, thickness * 0.72, (distance - (span - 1) * gap) / span);
   const step = size + gap;
   const categorySize = Math.min(16, Math.max(5, thickness / (vertical ? 2 : 1.65)));
+  const numberSize = numberStyle.size === undefined ? (vertical ? Math.min(14, categorySize) : categorySize)
+    : Math.min(numberStyle.size, Math.max(5, thickness * (vertical ? 1.25 : 0.76)));
+  const numberWidth = vertical ? Math.max(1, thickness - 4) : 69;
   const categoryEvery = Math.ceil(chart.categories.length / (vertical ? 24 : 30));
   const frameColor = style.frameColor ?? '#bfc9d9';
   const divider = vertical
@@ -77,7 +82,10 @@ export default function PictographGraphic({ chart, selection, highlight, editabl
           : { x: left, y: edge, width: right - left, height: thickness };
         const countText = value === null ? '—' : formatValue(value);
         const cells = filled + Number(fraction > 0);
-        const numberY = vertical ? bottom - (cells ? (cells - 1) * step + size : 0) - 9 : center + 5;
+        const numberY = vertical ? bottom - (cells ? (cells - 1) * step + size : 0) - 9
+          : center + (numberStyle.size === undefined ? 5 : numberSize / 3);
+        const numberText = tooMany ? `${countText} ·…` : countText;
+        const fitNumber = numberStyle.size !== undefined && estimateTextWidth(numberText, numberSize) > numberWidth;
         const categoryVisible = index % categoryEvery === 0 && !chart.hiddenCategoryLabels?.includes(index);
         const categoryX = vertical ? center : style.frame ? (left + table.labelDivider) / 2 : symbolLeft - 14;
         const categoryY = vertical ? style.frame ? (table.labelDivider + table.bottom) / 2 : bottom + 23
@@ -107,8 +115,9 @@ export default function PictographGraphic({ chart, selection, highlight, editabl
               ))}
               {(tooMany || value < 0 || showValues && index % categoryEvery === 0) && (
                 <text x={vertical ? center : right - 6} y={numberY} textAnchor={vertical ? 'middle' : 'end'}
-                  fontSize={vertical ? Math.min(14, categorySize) : categorySize} fill="#485861" data-custom-size="">
-                  {tooMany ? `${countText} ·…` : countText}
+                  fontSize={numberSize} {...typography} fill={numberStyle.color ?? '#485861'} data-custom-size="" data-value-label=""
+                  textLength={fitNumber ? numberWidth : undefined} lengthAdjust={fitNumber ? 'spacingAndGlyphs' : undefined}>
+                  {numberText}
                 </text>
               )}
             </>)}

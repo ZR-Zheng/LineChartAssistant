@@ -1,4 +1,4 @@
-import type { Axis, AxisArrowhead, AxisStyle, ChartDocument, ChartKind, ChartStyle, Mark, NoteTarget, PieStyle, Point, Series, SeriesStyle,
+import type { Axis, AxisArrowhead, AxisStyle, ChartDocument, ChartKind, ChartStyle, DataLabelStyle, Mark, NoteTarget, PieStyle, Point, Series, SeriesStyle,
   Statistic, TextFont, TextNote, TextStyle, TextTarget } from './types';
 
 export const WIDTH = 920;
@@ -47,6 +47,7 @@ export function isPieStyle(value: unknown): value is Partial<PieStyle> {
     && integer(style.legendMarkerSize, 7, 18) && integer(style.legendMarkerGap, 2, 12)
     && (style.holeRatio === undefined || typeof style.holeRatio === 'number' && style.holeRatio >= 0 && style.holeRatio <= 0.68)
     && (style.clockwise === undefined || typeof style.clockwise === 'boolean')
+    && [style.labelBold, style.labelItalic, style.labelUnderline].every(flag => flag === undefined || typeof flag === 'boolean')
     && choices(style.palette, ...Object.keys(PIE_PALETTES)) && choices(style.order, 'data', 'desc', 'asc')
     && choices(style.labelMode, 'percent', 'value', 'both') && choices(style.labelPlacement, 'middle', 'rim')
     && choices(style.legendSide, 'left', 'right') && choices(style.legendMarker, 'square', 'circle', 'line')
@@ -475,6 +476,47 @@ export function getSeriesStyle(series: Series, chartStyle: ChartStyle): SeriesSt
     columnWidth: 0.86,
     roundedColumns: true,
     ...series.style,
+  };
+}
+
+export function isDataLabelStyle(value: unknown): value is DataLabelStyle {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const { font, size, color, bold, italic, underline } = value as DataLabelStyle;
+  return (font === undefined || typeof font === 'string' && Object.hasOwn(TEXT_FONTS, font))
+    && (size === undefined || Number.isInteger(size) && size >= TEXT_SIZE.min && size <= TEXT_SIZE.max)
+    && (color === undefined || typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color))
+    && [bold, italic, underline].every(flag => flag === undefined || typeof flag === 'boolean');
+}
+
+export function dataLabelStyle(style: ChartStyle, series?: Series): DataLabelStyle {
+  return { ...style.dataLabel, ...series?.style?.dataLabel };
+}
+
+export function setDataLabelStyle(chart: ChartDocument, changes: DataLabelStyle, seriesIndex?: number): ChartDocument {
+  function update(style: DataLabelStyle | undefined, patch: DataLabelStyle) {
+    const entries = Object.entries({ ...style, ...patch }).filter(([, value]) => value !== undefined);
+    return entries.length ? Object.fromEntries(entries) as DataLabelStyle : undefined;
+  }
+
+  if (seriesIndex !== undefined) {
+    if (!chart.series[seriesIndex]) return chart;
+    const series = chart.series.map((item, index) => index === seriesIndex
+      ? { ...item, style: { ...item.style, dataLabel: update(item.style?.dataLabel, changes) } } : item);
+    return { ...chart, series };
+  }
+
+  const clearOverrides = Object.fromEntries(Object.keys(changes).map(key => [key, undefined]));
+  const series = chart.series.map(item => item.style?.dataLabel
+    ? { ...item, style: { ...item.style, dataLabel: update(item.style.dataLabel, clearOverrides) } } : item);
+  return { ...chart, series, style: { ...chart.style, dataLabel: update(chart.style.dataLabel, changes) } };
+}
+
+export function dataLabelTextAttributes(style: DataLabelStyle, defaultWeight = 650) {
+  return {
+    fontFamily: style.font && TEXT_FONTS[style.font].family,
+    fontWeight: style.bold === undefined ? defaultWeight : style.bold ? 700 : 400,
+    fontStyle: style.italic ? 'italic' : undefined,
+    textDecoration: style.underline ? 'underline' : undefined,
   };
 }
 

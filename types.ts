@@ -36,6 +36,8 @@ export interface TextStyle {
   alignment: 'start' | 'middle' | 'end';
 }
 
+export type DataLabelStyle = Partial<Pick<TextStyle, 'font' | 'size' | 'color' | 'bold' | 'italic' | 'underline'>>;
+
 export interface Point {
   x: number;
   y: number;
@@ -67,6 +69,7 @@ export interface SeriesStyle {
   dotFill: 'hollow' | 'solid';
   dots: boolean;
   showLabels: boolean;
+  dataLabel?: DataLabelStyle;
   columnWidth: number;
   roundedColumns: boolean;
   columnIcon?: { symbol: PictographSymbol; colorMode: PictographStyle['colorMode'] };
@@ -104,6 +107,7 @@ export interface AxisStyle {
 export interface ChartStyle {
   grid: boolean;
   showLabels: boolean;
+  dataLabel?: DataLabelStyle;
   dots: boolean;
   showOrigin: boolean;
   showTitle?: boolean;
@@ -159,6 +163,9 @@ export interface PieStyle {
   labelFont: TextFont;
   labelFontSize: number;
   labelColor?: string;
+  labelBold?: boolean;
+  labelItalic?: boolean;
+  labelUnderline?: boolean;
   labelPlacement: 'middle' | 'rim';
   legendFont: TextFont;
   legendFontSize: number;

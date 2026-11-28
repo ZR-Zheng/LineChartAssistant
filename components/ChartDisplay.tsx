@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { FocusEvent, KeyboardEvent, PointerEvent, ReactNode, RefObject } from 'react';
 import { AXIS_LENGTHS, axisTitleLayout, categoryTickLayout, categoryX, chartDataWarnings, clamp, constrainPlotOffset, DEFAULT_AXIS_ARROWHEAD, DEFAULT_GROUP_WIDTH,
-  DEFAULT_TICK_LABEL, displayedSeries, estimateTextWidth, exerciseNoteLayout, FONT, formatValue, getPlot, getScale, getSeriesStyle, getTextStyle, hasChartAxes, HEIGHT,
+  dataLabelStyle, dataLabelTextAttributes, DEFAULT_TICK_LABEL, displayedSeries, estimateTextWidth, exerciseNoteLayout, FONT, formatValue, getPlot, getScale, getSeriesStyle, getTextStyle, hasChartAxes, HEIGHT,
   hideText, isLightColor, isNote, markPath, movePlot, removeNote, setChartValue, shorten,
   STATISTIC_LABELS, TEXT_FONTS, textValue, tickOffsets, verticalAxisExtension, visibleMark, WIDTH } from '../chart';
 import type { Plot } from '../chart';
@@ -945,11 +945,15 @@ function ChartDisplay({
     );
   }
 
-  const valueLabels: { key: string; x: number; y: number; text: string; offset: number; fill: string; halo: boolean }[] = [];
-  const clippedLabels: { x: number; y: number; text: string }[] = [];
+  const valueLabels: { key: string; x: number; y: number; text: string; size: number; offset: number; fill: string; halo: boolean;
+    typography: ReturnType<typeof dataLabelTextAttributes> }[] = [];
+  const clippedLabels: { x: number; y: number; text: string; size: number }[] = [];
   const dataGraphics: ReactNode[] = !hasAxes ? [] : chart.series.map((series, seriesIndex) => {
     if (singleBar && seriesIndex !== (chart.barSeries ?? 0)) return null;
     const seriesStyle = getSeriesStyle(series, style);
+    const numberStyle = dataLabelStyle(style, series);
+    const labelSize = numberStyle.size ?? VALUE_FONT_SIZE;
+    const typography = dataLabelTextAttributes(numberStyle);
     const columnWidth = barWidth * seriesStyle.columnWidth;
     const columnIcon = columns ? seriesStyle.columnIcon : undefined;
     const symbolId = `${columnSymbolPrefix}-${seriesIndex}`;
@@ -984,17 +988,17 @@ function ChartDisplay({
           return start < end || value === 0 && start === end ? [{ top: scale.y(end), bottom: scale.y(start) }] : [];
         }) : [];
         const negativeBar = value < 0 && columns;
-        const labelBelow = negativeBar && y + 20 < plot.bottom;
-        const labelInside = negativeBar && y + 20 >= plot.bottom && y - zero >= 24 && barWidth >= 30;
+        const labelBelow = negativeBar && y + labelSize + 6 < plot.bottom;
+        const labelInside = negativeBar && !labelBelow && y - zero >= labelSize + 10 && barWidth >= labelSize + 16;
         const labelGap = chart.kind === 'line' ? Math.max(13, seriesStyle.dotSize + 7) : 13;
-        const labelY = labelInside ? y - 7 : labelBelow ? y + 17 : y - labelGap;
+        const labelY = labelInside ? y - 7 : labelBelow ? y + labelSize + 3 : y - labelGap;
         const valueText = valueLabelTexts.get(value) ?? String(value);
-        if (clipped) clippedLabels.push({ x, y: labelY, text: valueText });
+        if (clipped) clippedLabels.push({ x, y: labelY, text: valueText, size: labelSize });
         else if (seriesStyle.showLabels && index % valueEvery === 0) {
           valueLabels.push({
-            key: `${seriesIndex}:${index}`, x, y: labelY, text: valueText,
-            offset: labelInside ? 0 : labelBelow ? 20 : -20,
-            fill: columnIcon?.colorMode === 'color' || lightColor ? '#26334c' : labelInside && !columnIcon ? '#fff' : series.color,
+            key: `${seriesIndex}:${index}`, x, y: labelY, text: valueText, size: labelSize, typography,
+            offset: labelInside ? 0 : (labelBelow ? 1 : -1) * Math.max(20, labelSize + 6),
+            fill: numberStyle.color ?? (columnIcon?.colorMode === 'color' || lightColor ? '#26334c' : labelInside && !columnIcon ? '#fff' : series.color),
             halo: !columns || Boolean(labelInside && columnIcon),
           });
         }
@@ -1045,7 +1049,7 @@ function ChartDisplay({
             {clipped && <g data-clipped-value={value} pointerEvents="none">
               <path d={`M ${x - Math.min(6, columnWidth / 2)} ${y + 4} L ${x} ${y - 3} L ${x + Math.min(6, columnWidth / 2)} ${y + 4}`}
                 fill="#fff" stroke="#84591d" strokeWidth="1.5" strokeLinejoin="round" />
-              <text x={x} y={labelY} textAnchor="middle" fontSize={VALUE_FONT_SIZE} data-custom-size="" fontWeight="650" fill="#77511d">
+              <text x={x} y={labelY} textAnchor="middle" fontSize={labelSize} {...typography} data-custom-size="" fill={numberStyle.color ?? '#77511d'}>
                 {valueText}
               </text>
             </g>}
@@ -1168,9 +1172,9 @@ function ChartDisplay({
       })}
       {chart.kind === 'line' && dataGraphics}
       {placedValues.length > 0 && <g pointerEvents="none">
-        {placedValues.map(({ key, x, y, text, fill, halo }) => (
-          <text key={key} x={x} y={y} textAnchor="middle" fontSize={VALUE_FONT_SIZE} data-custom-size=""
-            data-value-label="" fontWeight="650" fill={fill} stroke={halo ? '#fff' : undefined} strokeWidth={halo ? 3 : undefined}
+        {placedValues.map(({ key, x, y, text, fill, halo, size, typography }) => (
+          <text key={key} x={x} y={y} textAnchor="middle" fontSize={size} {...typography} data-custom-size=""
+            data-value-label="" fill={fill} stroke={halo ? '#fff' : undefined} strokeWidth={halo ? 3 : undefined}
             paintOrder="stroke" strokeLinejoin="round">{text}</text>
         ))}
       </g>}

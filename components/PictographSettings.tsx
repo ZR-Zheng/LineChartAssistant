@@ -6,6 +6,7 @@ import { DEFAULT_PICTOGRAPH_LEGEND, DEFAULT_PICTOGRAPH_SHAPE, PICTOGRAPH_LEGEND_
   resetPictographLegend, resizePictographTable, savePictographLegendText, setPictographCategoryShare, updatePictographStyle } from '../pictograph';
 import type { ChartDocument, ChartEdit, PictographStyle } from '../types';
 import ColorPicker from './ColorPicker';
+import DataLabelStyleControl from './DataLabelStyleControl';
 import PictographSymbolField from './PictographSymbolField';
 
 export type PictographSettingsTab = 'shape' | 'legend';
@@ -117,6 +118,7 @@ export default function PictographSettings({ chart, onEdit, onClose, onToggleLab
           </div>
           <div className="panel-actions" role="group" aria-label="图标辅助显示">
             <button className="button compact" aria-pressed={getSeriesStyle(series, chart.style).showLabels} onClick={onToggleLabels}>数值标签</button>
+            <DataLabelStyleControl chart={chart} onEdit={onEdit} seriesIndex={seriesIndex} />
             <button className="button compact" aria-pressed={style.guides} onClick={() => update({ guides: !style.guides })}>辅助线</button>
             <button className="button compact" aria-pressed={style.frame} onClick={() => update({ frame: !style.frame })}>表格边框</button>
             {style.colorMode === 'single' && <button className="button compact" aria-pressed={style.outline}

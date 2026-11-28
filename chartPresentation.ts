@@ -118,6 +118,7 @@ interface ValueLabel {
   x: number;
   y: number;
   text: string;
+  size?: number;
   offset?: number;
 }
 
@@ -156,9 +157,9 @@ export function formatValueLabels(values: number[]) {
   }));
 }
 
-function labelBox({ x, y, text }: ValueLabel) {
-  const halfWidth = estimateTextWidth(text, VALUE_FONT_SIZE) / 2 + 3;
-  return { left: x - halfWidth, right: x + halfWidth, top: y - 14, bottom: y + 5 };
+function labelBox({ x, y, text, size = VALUE_FONT_SIZE }: ValueLabel) {
+  const halfWidth = estimateTextWidth(text, size) / 2 + 3;
+  return { left: x - halfWidth, right: x + halfWidth, top: y - size, bottom: y + Math.max(5, Math.ceil(size * 0.3)) };
 }
 
 export function placeValueLabels<T extends ValueLabel>(labels: T[], reserved: ValueLabel[], width: number, bottom: number) {
