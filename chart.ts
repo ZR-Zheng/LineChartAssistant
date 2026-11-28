@@ -60,9 +60,20 @@ export const TEXT_FONTS: Record<TextFont, { label: string; family: string }> = {
   sans: { label: '黑体', family: '"SimHei", "Heiti SC", "Microsoft YaHei", sans-serif' },
   serif: { label: '宋体', family: '"SimSun", "Songti SC", "Noto Serif CJK SC", serif' },
   kai: { label: '楷体', family: '"KaiTi", "Kaiti SC", "STKaiti", serif' },
+  yahei: { label: '微软雅黑', family: '"Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif' },
+  dengxian: { label: '等线', family: '"DengXian", "Microsoft YaHei", "PingFang SC", sans-serif' },
+  fangsong: { label: '仿宋', family: '"FangSong", "STFangsong", "FangSong_GB2312", "Noto Serif SC", serif' },
+  notoSans: { label: 'Noto Sans SC', family: '"Noto Sans SC", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei", "PingFang SC", sans-serif' },
+  notoSerif: { label: 'Noto Serif SC', family: '"Noto Serif SC", "Noto Serif CJK SC", "Source Han Serif SC", "SimSun", "Songti SC", serif' },
+  arial: { label: 'Arial', family: 'Arial, "Liberation Sans", "Microsoft YaHei", "PingFang SC", sans-serif' },
+  times: { label: 'Times New Roman', family: '"Times New Roman", "Liberation Serif", "SimSun", "Songti SC", serif' },
   mono: { label: '等宽', family: '"Consolas", "Menlo", monospace' },
 };
 export const DEFAULT_TICK_LABEL = { font: 'system', size: 15 } as const;
+export const TICK_LABEL_TEXT_KEYS = {
+  tickLabelFont: 'font', tickLabelSize: 'size', tickLabelBold: 'bold',
+  tickLabelItalic: 'italic', tickLabelUnderline: 'underline',
+} as const;
 export const MAX_MANUAL_TICKS = 500;
 export const STATISTIC_LABELS: Record<Statistic, string> = { max: '最大值', min: '最小值', mean: '平均值' };
 export const AXIS_TITLE_PLACEMENTS = {
@@ -397,12 +408,39 @@ export function getTextStyle(chart: Pick<ChartDocument, 'textStyles'> & Partial<
     font: categoryAxis?.tickLabelFont ?? DEFAULT_TICK_LABEL.font,
     size: categoryAxis?.tickLabelSize ?? defaultSize,
     color: title ? '#1c2540' : '#485861',
-    bold: title || axisTitle,
-    italic: false,
-    underline: false,
+    bold: title || axisTitle || categoryAxis?.tickLabelBold === true,
+    italic: categoryAxis?.tickLabelItalic === true,
+    underline: categoryAxis?.tickLabelUnderline === true,
     alignment: 'start',
     ...chart.textStyles?.[target],
   };
+}
+
+export function categoryLabelStyles(chart: ChartDocument) {
+  return Object.entries(chart.textStyles).flatMap(([target, style]) => {
+    const index = Number(target);
+    return /^(0|[1-9]\d*)$/.test(target) && index < chart.categories.length ? [[index, style] as const] : [];
+  });
+}
+
+export function setTickLabelStyle<Key extends keyof typeof TICK_LABEL_TEXT_KEYS>(
+  chart: ChartDocument, axis: Axis, key: Key, value: AxisStyle[Key],
+): ChartDocument {
+  const { axes } = chart.style;
+  const textKey = TICK_LABEL_TEXT_KEYS[key];
+  let textStyles = chart.textStyles;
+  if (axis === 'x') {
+    for (const [index, style] of categoryLabelStyles(chart)) {
+      if (style[textKey] === undefined) continue;
+      if (textStyles === chart.textStyles) textStyles = { ...textStyles };
+      const remaining = { ...style };
+      delete remaining[textKey];
+      if (Object.keys(remaining).length) textStyles[index] = remaining;
+      else delete textStyles[index];
+    }
+  }
+  if (axes[axis][key] === value && textStyles === chart.textStyles) return chart;
+  return { ...chart, textStyles, style: { ...chart.style, axes: { ...axes, [axis]: { ...axes[axis], [key]: value } } } };
 }
 
 export function exerciseNoteLayout(chart: ChartDocument, note: TextNote) {

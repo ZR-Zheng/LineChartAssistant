@@ -78,6 +78,9 @@ function presetAxis(axis: Axis, config: Preset['config']): AxisStyle {
       && { tickLabelFont: saved.tickLabelFont }),
     ...(typeof saved?.tickLabelSize === 'number' && Number.isFinite(saved.tickLabelSize)
       && { tickLabelSize: Math.round(clamp(saved.tickLabelSize, TEXT_SIZE.min, TEXT_SIZE.max)) }),
+    ...(typeof saved?.tickLabelBold === 'boolean' && { tickLabelBold: saved.tickLabelBold }),
+    ...(typeof saved?.tickLabelItalic === 'boolean' && { tickLabelItalic: saved.tickLabelItalic }),
+    ...(typeof saved?.tickLabelUnderline === 'boolean' && { tickLabelUnderline: saved.tickLabelUnderline }),
     tickLength: bounded(tickLength, 0, 20, fallback.tickLength),
     tickMode: saved?.tickMode === 'auto' || saved?.tickMode === 'all' || saved?.tickMode === 'interval'
       ? saved.tickMode : validInterval ? 'interval' : fallback.tickMode,

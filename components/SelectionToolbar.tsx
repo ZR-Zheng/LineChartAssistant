@@ -1,7 +1,7 @@
-import { RotateCcw, SlidersHorizontal, Tags, Trash2, X } from 'lucide-react';
+import { Bold, Italic, RotateCcw, SlidersHorizontal, Tags, Trash2, Underline, X } from 'lucide-react';
 import { useId, useLayoutEffect, useRef, useState } from 'react';
-import { clamp, DEFAULT_GROUP_WIDTH, DEFAULT_TICK_LABEL, getSeriesStyle, movePlot, parseValue, pieColor,
-  removeCategory, setChartValue, shorten, TEXT_FONTS, TEXT_SIZE } from '../chart';
+import { categoryLabelStyles, clamp, DEFAULT_GROUP_WIDTH, DEFAULT_TICK_LABEL, getSeriesStyle, movePlot, parseValue, pieColor,
+  removeCategory, setChartValue, setTickLabelStyle, shorten, TEXT_FONTS, TEXT_SIZE, TICK_LABEL_TEXT_KEYS } from '../chart';
 import { DEFAULT_PICTOGRAPH_STYLE, pictographSymbolAt } from '../pictograph';
 import type { PictographSymbol } from '../pictographSymbols';
 import type { Axis, AxisStyle, ChartDocument, ChartEdit, DataHighlight, Datum, PictographStyle, SeriesStyle } from '../types';
@@ -134,7 +134,9 @@ export function DataSelectionToolbar({ chart, datum, onEdit, onClose, onRemoveSe
   const categorySymbols = symbolStyle?.symbolMode === 'category';
   const colorMode = symbolStyle?.colorMode ?? DEFAULT_PICTOGRAPH_STYLE.colorMode;
   const menuId = useId();
-  const menu = useRef<HTMLDivElement>(null);
+  const deleteTrigger = useRef<HTMLButtonElement>(null);
+  const categoryPreview = shorten(categoryName, 20);
+  const seriesPreview = shorten(seriesName, 20);
 
   function format(changes: Partial<SeriesStyle>) {
     onEdit(chart => ({
@@ -237,32 +239,53 @@ export function DataSelectionToolbar({ chart, datum, onEdit, onClose, onRemoveSe
         </>}
       </div>}
       <div className="datum-toolbar-group datum-toolbar-delete">
-        <button className="button compact datum-delete-trigger" popoverTarget={menuId}
-          onClick={event => {
-            const rect = event.currentTarget.getBoundingClientRect();
-            const width = Math.min(250, document.documentElement.clientWidth - 16);
-            menu.current.style.left = `${Math.max(8, Math.min(rect.right, document.documentElement.clientWidth - 8) - width)}px`;
-            menu.current.style.top = `${Math.max(8, Math.min(rect.bottom + 5, document.documentElement.clientHeight - 126))}px`;
-          }}><Trash2 size={16} /> 删除数据…</button>
-        <div className="datum-delete-menu" popover="auto" id={menuId} ref={menu} role="group" aria-label="删除数据">
-          <button className="button compact" title={`清除 ${datumName} 的数值`} disabled={value === null} onClick={() => {
+        <button type="button" ref={deleteTrigger} className="button compact datum-delete-trigger" popoverTarget={menuId}>
+          <Trash2 size={16} /> 删除数据…
+        </button>
+        <div className="datum-delete-menu" popover="auto" id={menuId} role="group" aria-label="删除数据"
+          onToggle={event => {
+            const popup = event.currentTarget;
+            const trigger = deleteTrigger.current;
+            if (!trigger || event.newState !== 'open') return;
+            const { clientWidth, clientHeight } = popup.ownerDocument.documentElement;
+            const anchor = trigger.getBoundingClientRect();
+            const edge = 8;
+            const gap = 6;
+            const height = popup.offsetHeight;
+            const below = clientHeight - anchor.bottom - gap - edge;
+            const above = anchor.top - gap - edge;
+            const top = height > below && above > below ? anchor.top - gap - height : anchor.bottom + gap;
+            popup.style.left = `${Math.max(edge, Math.min(anchor.right, clientWidth - edge) - popup.offsetWidth)}px`;
+            popup.style.top = `${Math.max(edge, Math.min(top, clientHeight - height - edge))}px`;
+          }}>
+          <button type="button" className="button compact" title={datumName} disabled={value === null} onClick={() => {
             onEdit(chart => setChartValue(chart, datum.series, datum.index, null));
             onClose();
-          }}>清除「{shorten(categoryName, 10)}」的此项数值</button>
-          <button className="button compact" title={`删除整行 ${categoryName}`} disabled={chart.categories.length <= 1} onClick={() => {
+          }}>
+            <span>清空单个数值</span>
+            <small>{value === null ? '当前数值已为空。' : `仅将「${categoryPreview}」在「${seriesPreview}」中的数值留空。`}</small>
+          </button>
+          <button type="button" className="button compact" title={categoryName} disabled={chart.categories.length <= 1} onClick={() => {
             onEdit(chart => removeCategory(chart, datum.index));
             onClose();
-          }}>删除「{shorten(categoryName, 12)}」整行</button>
+          }}>
+            <span>删除此类别</span>
+            <small>{chart.categories.length <= 1 ? '至少保留一个类别。' : `移除「${categoryPreview}」及其在所有系列中的数值。`}</small>
+          </button>
           {chart.series.length > 1 ? (
-            <button className="button compact" title={`删除整组 ${seriesName}`} onClick={() => onRemoveSeries(datum.series)}>
-              删除「{shorten(seriesName, 12)}」整组
+            <button type="button" className="button compact" title={seriesName} onClick={() => onRemoveSeries(datum.series)}>
+              <span>删除此系列</span>
+              <small>移除「{seriesPreview}」及其在所有类别中的数值。</small>
             </button>
           ) : (
-            <button className="button compact" title={`清空整组 ${seriesName}`} disabled={series.values.every(value => value === null)} onClick={() => {
+            <button type="button" className="button compact" title={seriesName} disabled={series.values.every(value => value === null)} onClick={() => {
               onEdit(current => ({ ...current, scaleExtent: null, series: current.series.map((item, index) => index === datum.series
                 ? { ...item, values: item.values.map(() => null) } : item) }));
               onClose();
-            }}>清空「{shorten(seriesName, 12)}」整组</button>
+            }}>
+              <span>清空本系列所有数值</span>
+              <small>将「{seriesPreview}」的数值全部留空，保留类别和系列。</small>
+            </button>
           )}
         </div>
       </div>
@@ -277,6 +300,19 @@ export function AxisSelectionToolbar({ chart, axis, onEdit, onSettings }: Omit<P
   const axisName = axis === 'both' ? '坐标系' : axis === 'x' ? '横轴' : '纵轴';
   const values = axis === 'x' ? '标签' : '标值';
   const mixedWidth = axis === 'both' && chart.style.axes.x.width !== chart.style.axes.y.width;
+  const labelStyles = axis === 'x' ? categoryLabelStyles(chart) : [];
+  const labelFont = style.tickLabelFont ?? DEFAULT_TICK_LABEL.font;
+  const mixedFont = hasLabelOverride('tickLabelFont', labelFont);
+  const mixedSize = hasLabelOverride('tickLabelSize', style.tickLabelSize ?? DEFAULT_TICK_LABEL.size);
+
+  function hasLabelOverride<Key extends keyof typeof TICK_LABEL_TEXT_KEYS>(key: Key, value: AxisStyle[Key]) {
+    const textKey = TICK_LABEL_TEXT_KEYS[key];
+    return labelStyles.some(([, label]) => label[textKey] !== undefined && label[textKey] !== value);
+  }
+
+  function updateLabel<Key extends keyof typeof TICK_LABEL_TEXT_KEYS>(key: Key, value: AxisStyle[Key]) {
+    if (axis !== 'both') onEdit(chart => setTickLabelStyle(chart, axis, key, value));
+  }
 
   function update<Key extends keyof AxisStyle>(key: Key, value: AxisStyle[Key]) {
     onEdit(chart => {
@@ -296,14 +332,29 @@ export function AxisSelectionToolbar({ chart, axis, onEdit, onSettings }: Omit<P
       <span className="text-toolbar-name">{axisName}</span>
       {axis !== 'both' && <>
         <label>{values}字体
-          <select value={style.tickLabelFont ?? DEFAULT_TICK_LABEL.font}
-            onChange={event => update('tickLabelFont', event.target.value as AxisStyle['tickLabelFont'])}>
+          <select value={mixedFont ? '' : labelFont}
+            onChange={event => updateLabel('tickLabelFont', event.target.value as AxisStyle['tickLabelFont'])}>
+            {mixedFont && <option value="" disabled>混合</option>}
             {Object.entries(TEXT_FONTS).map(([value, font]) => <option key={value} value={value}>{font.label}</option>)}
           </select>
         </label>
-        <NumberField label={`${values}字号`} value={style.tickLabelSize} placeholder={`默认 ${DEFAULT_TICK_LABEL.size}`}
+        <NumberField label={`${values}字号`} value={mixedSize ? undefined : style.tickLabelSize}
+          placeholder={mixedSize ? '混合' : `默认 ${DEFAULT_TICK_LABEL.size}`}
           normalize={value => clamp(Math.round(value), TEXT_SIZE.min, TEXT_SIZE.max)}
-          onChange={value => update('tickLabelSize', value ?? undefined)} />
+          onChange={value => updateLabel('tickLabelSize', value ?? undefined)} />
+        <div className="text-format-actions" role="group" aria-label={`${values}文字样式`}>
+          {([
+            ['tickLabelBold', '加粗', Bold],
+            ['tickLabelItalic', '斜体', Italic],
+            ['tickLabelUnderline', '下划线', Underline],
+          ] as const).map(([key, label, Icon]) => {
+            const pressed = hasLabelOverride(key, style[key] ?? false) ? 'mixed' : style[key] === true;
+            return <button key={key} type="button" className="icon-button text-weight" aria-pressed={pressed}
+              aria-label={`${values}${label}`} title={`${values}${label}`} onClick={() => updateLabel(key, pressed !== true)}>
+              <Icon size={17} />
+            </button>;
+          })}
+        </div>
       </>}
       <button className="button compact" onClick={event => onSettings(axis === 'both' ? 'x' : axis, event.currentTarget)}><SlidersHorizontal size={15} /> 坐标轴设置</button>
       {axis !== 'both' && <>

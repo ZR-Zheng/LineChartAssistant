@@ -209,11 +209,12 @@ test('dense vertical tick labels are spaced while their tick marks are retained'
   assert.ok(splitLabels.has(omitted.from) && splitLabels.has(omitted.to));
 });
 
-test('axis toolbars expose both label fonts and sizes while geometry stays in axis settings', () => {
+test('axis toolbars expose label fonts, sizes and formatting while geometry stays in axis settings', () => {
   const workspace = boards.initialWorkspace();
   const chart = activeChart(workspace);
-  const x = { ...chart.style.axes.x, tickLabelFont: 'kai', tickLabelSize: 24 };
-  const y = { ...chart.style.axes.y, tickPosition: 'outside', tickLabelFont: 'mono', tickLabelSize: 27 };
+  const formats = { tickLabelBold: true, tickLabelItalic: true, tickLabelUnderline: true };
+  const x = { ...chart.style.axes.x, ...formats, tickLabelFont: 'fangsong', tickLabelSize: 24 };
+  const y = { ...chart.style.axes.y, ...formats, tickPosition: 'outside', tickLabelFont: 'mono', tickLabelSize: 27 };
   chart.style = { ...chart.style, axes: { x, y } };
   const restored = activeChart(storage.parseWorkspace(storage.serializeWorkspace(workspace)));
   assert.deepEqual(restored.style.axes.x, x);
@@ -229,23 +230,63 @@ test('axis toolbars expose both label fonts and sizes while geometry stays in ax
   assert.match(verticalToolbar, /标值字号<input[^>]+value="27"/);
   const horizontalToolbar = renderToStaticMarkup(createElement(AxisSelectionToolbar, { chart: restored, axis: 'x' }));
   assert.match(horizontalToolbar, /标签字体<select/);
-  assert.match(horizontalToolbar, /<option value="kai" selected="">楷体<\/option>/);
+  assert.match(horizontalToolbar, /<option value="fangsong" selected="">仿宋<\/option>/);
   assert.match(horizontalToolbar, /标签字号<input[^>]+value="24"/);
+  for (const [toolbar, prefix] of [[horizontalToolbar, '标签'], [verticalToolbar, '标值']]) {
+    for (const label of ['加粗', '斜体', '下划线']) {
+      assert.match(toolbar, new RegExp(`<button[^>]*aria-pressed="true" aria-label="${prefix}${label}"`));
+    }
+  }
   assert.doesNotMatch(horizontalToolbar + verticalToolbar, /轴线样式|轴线长度|箭头样式/);
   assert.match(horizontalToolbar, /刻度位置/);
   assert.match(horizontalToolbar, /网格线/);
 
   const svg = renderToStaticMarkup(createElement(ChartDisplay, { document: restored }));
+  assert.match(svg, /<svg[^>]+style="font-synthesis:weight style"/);
   const labels = [...svg.matchAll(/<text [^>]*data-(?:tick-label="y"|origin="")[^>]*>/g)].map(match => match[0]);
   assert.ok(labels.length > 1);
-  assert.ok(labels.every(label => label.includes('font-size="27"') && label.includes('Consolas')));
+  for (const label of labels) {
+    assert.match(label, /font-size="27"[^>]*Consolas[^>]*font-weight="700" font-style="italic" text-decoration="underline"/);
+  }
   const scale = chartTools.getScale(restored.series, null, chartTools.getPlot(restored), y);
   const positions = [0, ...presentation.spacedTickLabels(scale.ticks, scale.y, true, null, 27)].map(scale.y).sort((a, b) => a - b);
   assert.ok(positions.slice(1).every((position, index) => position - positions[index] >= 32 - 1e-6));
-  assert.match(svg, /<text [^>]*font-size="24"[^>]*font-family="[^"]*KaiTi[^"]*"[^>]*>周一<\/text>/);
-  const individual = { ...restored, textStyles: { 0: { size: 18, font: 'serif' } } };
+  assert.match(svg, /<text [^>]*font-size="24"[^>]*font-family="[^"]*FangSong[^"]*"[^>]*font-weight="700" font-style="italic" style="text-decoration:underline"[^>]*>周一<\/text>/);
+  const individual = { ...restored, textStyles: { 0: { size: 18, font: 'serif', bold: false, italic: false, underline: false } } };
   const individualSvg = renderToStaticMarkup(createElement(ChartDisplay, { document: individual }));
-  assert.match(individualSvg, /<text [^>]*font-size="18"[^>]*font-family="[^"]*SimSun[^"]*"[^>]*>周一<\/text>/);
+  const individualLabel = individualSvg.match(/<text [^>]*font-size="18"[^>]*font-family="[^"]*SimSun[^"]*"[^>]*font-weight="500"[^>]*>周一<\/text>/);
+  assert.ok(individualLabel);
+  assert.doesNotMatch(individualLabel[0], /font-style|text-decoration/);
+});
+
+test('whole-axis formatting replaces only the matching category label overrides', () => {
+  const base = activeChart(boards.initialWorkspace());
+  const chart = {
+    ...base,
+    style: { ...base.style, axes: { ...base.style.axes, x: { ...base.style.axes.x, tickLabelFont: 'fangsong', tickLabelBold: true } } },
+    textStyles: {
+      0: { font: 'kai', size: 24, bold: false, color: '#ab1234' },
+      1: { font: 'mono' },
+      xLabel: { font: 'serif', size: 22 },
+    },
+  };
+  const toolbar = renderToStaticMarkup(createElement(AxisSelectionToolbar, { chart, axis: 'x' }));
+  assert.match(toolbar, /标签字体<select><option value="" disabled="" selected="">混合<\/option>/);
+  assert.match(toolbar, /标签字号<input[^>]*placeholder="混合"/);
+  assert.match(toolbar, /aria-pressed="mixed" aria-label="标签加粗"/);
+
+  const vertical = chartTools.setTickLabelStyle(chart, 'y', 'tickLabelFont', 'serif');
+  assert.equal(vertical.textStyles, chart.textStyles);
+  const font = chartTools.setTickLabelStyle(chart, 'x', 'tickLabelFont', 'fangsong');
+  assert.deepEqual(font.textStyles, { 0: { size: 24, bold: false, color: '#ab1234' }, xLabel: chart.textStyles.xLabel });
+  const size = chartTools.setTickLabelStyle(font, 'x', 'tickLabelSize', 19);
+  const bold = chartTools.setTickLabelStyle(size, 'x', 'tickLabelBold', true);
+  assert.deepEqual(bold.textStyles, { 0: { color: '#ab1234' }, xLabel: chart.textStyles.xLabel });
+  assert.equal(bold.style.axes.y, chart.style.axes.y);
+  for (const index of [0, 1]) {
+    const { font, size, bold: weight } = chartTools.getTextStyle(bold, index);
+    assert.deepEqual({ font, size, bold: weight }, { font: 'fangsong', size: 19, bold: true });
+  }
 });
 
 test('new axes use inward tick marks and 15-unit labels', () => {

@@ -1074,7 +1074,9 @@ function ChartDisplay({
     const length = Math.max(1, x - 6);
     const fit = estimateTextWidth(label, yTickSize) > length;
     return <text x={x} y={scale.y(value)} textAnchor="end" dominantBaseline="central"
-      fontSize={yTickSize} fontFamily={yTickFont} data-custom-size="" fill="#4e5b73"
+      fontSize={yTickSize} fontFamily={yTickFont} fontWeight={yAxis.tickLabelBold ? 700 : undefined}
+      fontStyle={yAxis.tickLabelItalic ? 'italic' : undefined} textDecoration={yAxis.tickLabelUnderline ? 'underline' : undefined}
+      data-custom-size="" fill="#4e5b73"
       data-origin={origin ? '' : undefined} data-tick-label={origin ? undefined : 'y'}
       textLength={fit ? length : undefined} lengthAdjust={fit ? 'spacingAndGlyphs' : undefined}>{label}</text>;
   }
@@ -1094,7 +1096,7 @@ function ChartDisplay({
       tabIndex={tool === 'preview' ? undefined : focusedObject ? -1 : 0}
       role={tool === 'preview' ? undefined : 'group'} aria-label={tool === 'preview' ? undefined : '统计图画布'}
       aria-description={tool === 'preview' ? undefined : '方向键切换对象，按 Enter 或空格编辑。按 Alt 和方向键微调数据和可移动对象。'}
-      aria-hidden={tool === 'preview' || undefined} fontFamily={FONT}
+      aria-hidden={tool === 'preview' || undefined} fontFamily={FONT} style={{ fontSynthesis: 'weight style' }}
       onFocus={tool === 'preview' ? undefined : focusCanvasObject} onKeyDownCapture={tool === 'preview' ? undefined : navigateCanvas}
       onBlur={tool === 'preview' ? undefined : event => {
         if (!event.currentTarget.contains(event.relatedTarget)) setAdjusting(false);

@@ -218,11 +218,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .text-toolbar input.toolbar-name-input { width: 92px; }
 .text-toolbar input[type="color"] { width: 33px; cursor: pointer; padding: 3px; }
 .text-toolbar .text-weight[aria-pressed="true"] { color: var(--accent-dark); background: var(--accent-soft); }
+.text-toolbar .text-weight[aria-pressed="mixed"] { color: var(--accent-dark); border-color: var(--accent); border-style: dashed; }
 .text-format-actions { display: flex; align-items: center; gap: 2px; }
-.datum-delete-menu { inset: auto; margin: 0; width: min(250px, calc(100vw - 16px)); padding: 5px; background: #fff;
-  border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 5px 16px #26386026; }
-.datum-delete-menu:popover-open { display: grid; gap: 3px; }
-.datum-delete-menu .button { justify-content: flex-start; overflow: hidden; }
 .text-toolbar .text-toolbar-close { margin-left: auto; }
 .color-field { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); font-size: 13px; white-space: nowrap; }
 .color-picker { position: relative; flex: none; }

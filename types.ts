@@ -21,7 +21,8 @@ export type Selection =
   | { kind: 'pie-legend' }
   | { kind: 'pictograph-legend' }
   | { kind: 'axis'; axis: Axis | 'both' };
-export type TextFont = 'system' | 'sans' | 'serif' | 'kai' | 'mono';
+export type TextFont = 'system' | 'sans' | 'serif' | 'kai' | 'mono'
+  | 'yahei' | 'dengxian' | 'fangsong' | 'notoSans' | 'notoSerif' | 'arial' | 'times';
 export type TickMode = 'auto' | 'all' | 'interval';
 export type AxisBreak = { from: number; to: number };
 
@@ -87,6 +88,9 @@ export interface AxisStyle {
   tickPosition: 'outside' | 'inside' | 'cross';
   tickLabelFont?: TextFont;
   tickLabelSize?: number;
+  tickLabelBold?: boolean;
+  tickLabelItalic?: boolean;
+  tickLabelUnderline?: boolean;
   tickMode: TickMode;
   interval: number;
   maximum?: number;
